@@ -400,14 +400,54 @@ Agosto...) sin año que los distinguiera.
   `mesesAnio = mesesDisp.filter(m => m.slice(0,4)===fA)` en vez de `mesesDisp` para las columnas de
   la tabla mensual, el acumulado del encabezado y el % global (trazabilidad+valorización) por
   sucursal.
-- **Limitación conocida**: en el modo "Cargar desde Sheets" (sin Excel cargado), la hoja
-  `🎯 Objetivos` no guarda el año — el código reconstruye `mesKey` asumiendo siempre
-  `new Date().getFullYear()`. Ahí el selector de Año solo mostrará una opción (el año actual), sin
-  regresión respecto al comportamiento previo. Arreglarlo de fondo requeriría agregar una columna
-  Año también a `♻️ Valorización`/`🎯 Objetivos` y tocar `doGet`/`writeObjetivos` de las 6 empresas
-  — no se hizo, fuera de alcance de este pedido.
+- **Limitación conocida** (parcialmente resuelta para Euro el 2026-07-28, ver sección siguiente):
+  en el modo "Cargar desde Sheets" (sin Excel cargado), las hojas `♻️ Valorización`/`🎯 Objetivos`
+  de Copec/Abastible/Socovesa/Gespania/Salfa/Ando no guardan el año — el código reconstruye
+  `mesKey` asumiendo siempre `new Date().getFullYear()`. Ahí el selector de Año solo mostrará una
+  opción (el año actual), sin regresión respecto al comportamiento previo. Arreglarlo de fondo
+  para esas 6 empresas requeriría el mismo cambio que se hizo para Euro (agregar columna Año +
+  tocar `doGet`/`writeObjetivos`/`writeValorizacion`) — no se hizo, fuera de alcance salvo que se
+  pida explícitamente.
+
+## Año en Valorización y Objetivos de Euro (agregado 2026-07-28)
+El usuario agregó a mano una columna `Año` en `🎯 Objetivos` (columna D, entre Mes y Objetivo) y
+trató de meter el año en el encabezado de `♻️ Valorización` escribiendo algo como "Julio - 2024"
+en las celdas de mes. Esto último **rompió la lectura**: Google Sheets convirtió ese texto en una
+fecha real, y el Apps Script devuelve esas celdas como objetos Date estringificados
+(`"Mon Jul 01 2024 03:00:00 GMT-0400 (hora estándar de Chile)"`), que no calzan con ningún nombre
+de mes (`Enero`..`Diciembre`) que busca el código — toda la lectura de `% Real`/`% Acumulado`/
+`Meta %` de Euro quedaba en null. No había datos reales todavía bajo esos encabezados, así que no
+se perdió información al plantear el fix.
+
+**Diseño adoptado (igual patrón que Objetivos/Total Residuos): columna Año + una fila por año**,
+en vez de un encabezado con un mes-año distinto por columna:
+- `♻️ Valorización` de Euro debe quedar: `empresa_id | Sucursal | Tipo | Año | Enero | Febrero |
+  ... | Diciembre` (16 columnas). Por cada sucursal y cada año con datos, 3 filas (% Real/
+  % Acumulado/Meta %) con solo esos 12 meses — no un encabezado gigante de 34 columnas.
+- **Pendiente manual del usuario en el Sheet**: en la pestaña `♻️ Valorización`, seleccionar la
+  fila de encabezados (fila 5) y las celdas de mes, Formato > Número > **Texto sin formato**, y
+  volver a escribir solo `Enero`, `Febrero`, ... `Diciembre` (12 columnas, sin año) — borrando las
+  ~34 columnas de fecha generadas por error. Luego insertar una columna `Año` nueva entre `Tipo` y
+  `Enero`.
+- `autoSync()` en el JS: para Euro (`esEuroVal`), en vez de una fila por Tipo cubriendo todo
+  `mesesDisp`, genera `aniosDisp = Array.from(new Set(mesesDisp.map(m=>m.slice(0,4))))` y por cada
+  año una fila `[id,suc,'% Real',anio,...12 meses]` (y lo mismo para `% Acumulado`/`Meta %`). Usa
+  `getAcum(suc,mKey,anio)` (el parámetro `anio` ya existía, agregado el 2026-07-27 para el selector
+  de Objetivos) para que el acumulado no mezcle años. Las otras 6 empresas no cambian.
+- `filasObj` en `autoSync()`: para Euro, inserta `r.mesKey.slice(0,4)` (o `''` para las filas
+  anuales) como 4to elemento, calzando con la columna Año que el usuario ya agregó en D. No
+  requiere cambios en `Code-Euro.gs` (`writeObjetivos` es agnóstico al largo de la fila).
+- Lectura (`loadSheetsData()` y el fallback `sheetsObjetivosData` de `renderCopecObjetivos()`):
+  ahora usan `row['Año'] || new Date().getFullYear()` en vez de asumir siempre el año actual — este
+  cambio es general (no exclusivo de Euro), así que si en el futuro se agrega la columna Año a
+  otra empresa, la lectura ya la va a aprovechar automáticamente sin tocar código de nuevo.
 
 ## Pendientes conocidos
+- [ ] **Euro**: arreglar el encabezado de `♻️ Valorización` en el Sheet real — hoy tiene ~34
+      columnas de fecha mal generadas (ver sección "Año en Valorización y Objetivos de Euro").
+      Formatear como texto sin formato, dejar solo `Enero`..`Diciembre` (12 columnas), e insertar
+      una columna `Año` nueva entre `Tipo` y `Enero`. Sin este arreglo manual en el Sheet, el
+      código nuevo (que ya espera esa columna) no tiene dónde leer/escribir el año.
 - [ ] **Urgente**: redesplegar el `.gs` actualizado (fix de `writeValorizacion` borrando la
       Meta % — ver bug #8 arriba) en Copec, Abastible, Gespania, Salfa, Euro y Ando — los 6
       archivos que vive en este repo. Hasta entonces, cualquier Excel que se suba antes de que

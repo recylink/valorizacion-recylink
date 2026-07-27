@@ -667,8 +667,27 @@ function autoSync(rows) {
   // Preparar payload valorización
   var metasActuales = empresaActual === 'copec' ? getCopecMetas() : empresaActual === 'abastible' ? ABASTIBLE_METAS : (empresaActual === 'gespania' || empresaActual === 'salfa' || empresaActual === 'euro' || empresaActual === 'ando') ? metasFromSheets : {};
   var filasVal = [];
+  // Euro: fila por Tipo POR AÑO (columna Año agregada a mano en la hoja, con
+  // meses fijos Ene-Dic) en vez de un encabezado con un mes-año por columna —
+  // Sheets convertia ese texto en fecha real y rompia la lectura (ver
+  // CONTEXTO-PROYECTO.md, "Año en Valorizacion (Euro)").
+  var esEuroVal = empresaActual === 'euro';
+  var aniosDisp = esEuroVal ? Array.from(new Set(mesesDisp.map(function(m){ return m.slice(0,4); }))).sort() : null;
   sucursales.forEach(function(suc){
     var id = sucId(suc);
+    if (esEuroVal) {
+      aniosDisp.forEach(function(anio){
+        var valsReal = MES_L.map(function(_,i){ var mKey=anio+'-'+String(i+1).padStart(2,'0'); var p=getPct(suc,mKey); return p!==null?parseFloat(p.toFixed(1))+'%':''; });
+        filasVal.push([id,suc,'% Real',anio].concat(valsReal));
+        var valsAcum = MES_L.map(function(_,i){ var mKey=anio+'-'+String(i+1).padStart(2,'0'); var a=getAcum(suc,mKey,anio); return a!==null?parseFloat(a.toFixed(1))+'%':''; });
+        filasVal.push([id,suc,'% Acumulado',anio].concat(valsAcum));
+        if (metasActuales[suc] !== undefined) {
+          var metaValAnio = metasActuales[suc]+'%';
+          filasVal.push([id,suc,'Meta %',anio].concat(MES_L.map(function(){ return metaValAnio; })));
+        }
+      });
+      return;
+    }
     var vals = mesesDisp.map(function(m){ var p=getPct(suc,m); return p!==null?parseFloat(p.toFixed(1))+'%':''; });
     filasVal.push([id,suc,'% Real'].concat(vals));
     var acums = mesesDisp.map(function(m){ var a=getAcum(suc,m); return a!==null?parseFloat(a.toFixed(1))+'%':''; });
@@ -721,7 +740,14 @@ function autoSync(rows) {
   // Preparar payload objetivos para Copec (trazabilidad)
   var filasObj = [];
   if (emp.objetivos) {
+    var esEuroObj = empresaActual === 'euro';
     filasObj = calcObjetivos().map(function(r){
+      if (esEuroObj) {
+        // Euro agregó una columna Año en D de 🎯 Objetivos — vacía para las
+        // filas anuales (mesKey='anual', no aplica un año especifico).
+        var anioObj = r.anual ? '' : r.mesKey.slice(0,4);
+        return [sucId(r.suc), r.suc, r.mes, anioObj, r.obj, r.estado, r.detalle];
+      }
       return [sucId(r.suc), r.suc, r.mes, r.obj, r.estado, r.detalle];
     });
   }
@@ -1399,12 +1425,13 @@ function loadSheetsData(data) {
       }
       if (tipo === '% Acumulado') {
         // Usar el acumulado ya calculado (ponderado por kg) en vez de recalcularlo
-        // como promedio simple de los % mensuales — ver getAcum().
+        // como promedio simple de los % mensuales — ver getAcum(). Si la fila
+        // trae columna "Año" (Euro), usar ese año real en vez de asumir el actual.
         if (!acumFromSheets[suc]) acumFromSheets[suc] = {};
         Object.keys(MESES_ES).forEach(function(k) {
           var pct = parsePct(row[MESES_ES[k]]);
           if (pct === null) return;
-          var mesKey = new Date().getFullYear() + '-' + String(k).padStart(2,'0');
+          var mesKey = (row['Año'] || new Date().getFullYear()) + '-' + String(k).padStart(2,'0');
           acumFromSheets[suc][mesKey] = pct;
         });
         return;
@@ -1415,7 +1442,7 @@ function loadSheetsData(data) {
       Object.keys(MESES_ES).forEach(function(k) {
         var pct = parsePct(row[MESES_ES[k]]);
         if (pct === null) return;
-        var mesKey = new Date().getFullYear() + '-' + String(k).padStart(2,'0');
+        var mesKey = (row['Año'] || new Date().getFullYear()) + '-' + String(k).padStart(2,'0');
         if (!valMatrix[suc][mesKey]) valMatrix[suc][mesKey] = {total:100, val:pct, fromSheets:true};
       });
     });
@@ -1679,7 +1706,7 @@ function renderCopecObjetivos() {
       }
       var mesKey = null;
       Object.keys(MESES_ES).forEach(function(k){
-        if (MESES_ES[k] === mes2) mesKey = new Date().getFullYear()+'-'+String(k).padStart(2,'0');
+        if (MESES_ES[k] === mes2) mesKey = (r['Año']||new Date().getFullYear())+'-'+String(k).padStart(2,'0');
       });
       if (!mesKey) return;
       objBySucMes[suc2+'|'+mesKey+'|'+obj2] = {suc:suc2, mesKey:mesKey, obj:obj2, estado:estado, detalle:detalle2};
