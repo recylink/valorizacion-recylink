@@ -47,10 +47,14 @@ function writeValorizacion(ss, data) {
   const startRow = 6;
   const lastRow = sheet.getLastRow();
   if (lastRow >= startRow) {
-    const col = sheet.getRange(startRow, 1, lastRow - startRow + 1, 1).getValues();
-    const ids = new Set(data.filas.map(f => f[0]));
+    // Borrar por empresa_id+Tipo (no solo empresa_id): si el cliente no manda
+    // la fila "Meta %" (porque todavía no conoce el valor real), esta no debe
+    // borrarse — antes se borraban las 3 filas (% Real/% Acumulado/Meta %) por
+    // cualquier coincidencia de empresa_id, perdiendo la meta ya guardada.
+    const cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 3).getValues();
+    const keys = new Set(data.filas.map(f => f[0] + '|' + f[2]));
     const toDelete = [];
-    col.forEach((r, i) => { if (ids.has(r[0])) toDelete.push(startRow + i); });
+    cols.forEach((r, i) => { if (keys.has(r[0] + '|' + r[2])) toDelete.push(startRow + i); });
     toDelete.reverse().forEach(r => sheet.deleteRow(r));
   }
   const insertRow = sheet.getLastRow() + 1;
@@ -147,7 +151,7 @@ function writeTotalResiduos(ss, data) {
   var headerRow = buscarFilaEncabezado_(sheet, 'Sucursal');
   if (!headerRow) throw new Error('No se encontro la fila de encabezado ("Sucursal") en Total Residuos');
   var startRow = headerRow + 1;
-  var numCols = 7; // Sucursal | Mes | Residuo | Valorizado/No Valorizado | Respel no respel | Total KG | Total M3
+  var numCols = 9; // Sucursal | Año | Mes | Residuo | Valorizado/No Valorizado | Respel no respel | Total KG | Total M3 | Tons. CO2eq. evitadas
   var lastRow = sheet.getLastRow();
   if (lastRow >= startRow) {
     sheet.getRange(startRow, 1, lastRow - startRow + 1, numCols).clearContent();

@@ -1,27 +1,27 @@
 /**
  * ============================================================
- * RECYLINK · Apps Script del Sheet de ABASTIBLE
+ * RECYLINK · Apps Script del Sheet de ANDO
  * ============================================================
- * Reemplaza por completo el Code.gs actual del proyecto de Apps Script
- * ligado al Sheet de Abastible. Cambios respecto al que había:
+ * Proyecto de Apps Script nuevo, para vincular al Sheet de Ando
+ * (ID 1r4TtS9Gtrd83oZse8yABCHRg4V1lxgxoW6a3YCxbpk0). No existía Apps
+ * Script previo para esta empresa.
  *
- * 1) NUEVO: soporte para tipo:'totalResiduos' en doPost, que sincroniza
- *    la hoja "Total Residuos" (Sucursal | Mes | Residuo |
- *    Valorizado/No Valorizado | Respel no respel | Total KG | Total M3).
- *    Requiere crear esa pestaña manualmente en el Sheet (con esos
- *    headers, en cualquier fila — el código ubica la fila de encabezado
- *    buscando "Sucursal" en la columna A).
+ * Mismo esquema que Code-Gespania.gs / Code-Salfa.gs / Code-Euro.gs:
+ * writeObjetivos borra solo por empresa_id + mes exacto (no por prefijo
+ * de empresa completo), soporte para tipo:'totalResiduos', y doGet
+ * expone la hoja RESPEL propia del Sheet (Residuo -> TRUE/FALSE).
  *
- * 2) FIX: writeObjetivos borraba TODAS las filas de la empresa completa
- *    (agrupaba por el primer token del empresa_id, ej. "abastible"),
- *    así que sincronizar un mes borraba el histórico de objetivos de
- *    TODAS las sucursales y meses. Ahora borra solo por
- *    empresa_id + mes exacto, igual que ya se corrigió para Socovesa.
+ * Requiere que el Sheet tenga las pestañas "Total Residuos" (headers:
+ * Sucursal | Mes | Residuo | Valorizado/No Valorizado | Respel no respel
+ * | Total KG | Total M3) y "RESPEL" (headers: Residuo | RESPEL) ya
+ * creadas — Ando ya trae ambas listas para usar. A diferencia de Euro,
+ * Ando NO usa las columnas Año ni Tons. CO2eq. evitadas (esas 2 quedan
+ * exclusivas de Euro por decisión del usuario, 2026-07-27).
  *
- * No se agregó lectura de una hoja "RESPEL" en doGet: Abastible no la
- * necesita, la clasificación Respel/No respel se resuelve en el JS del
- * visor por nombre de residuo (ya tiene un residuo llamado literalmente
- * "RESPEL" en sus datos).
+ * Nota: la hoja Trazabilidad_Docs de Ando tiene una columna extra al
+ * final ("Comentario por sucursal") que no está en trazCols del HTML —
+ * writeTrazabilidad borra y reinserta la fila completa en cada sync, así
+ * que cualquier comentario manual en esa columna se pierde al sincronizar.
  * ============================================================
  */
 
@@ -56,7 +56,9 @@ function writeValorizacion(ss, data) {
     // Borrar por empresa_id+Tipo (no solo empresa_id): si el cliente no manda
     // la fila "Meta %" (porque todavía no conoce el valor real), esta no debe
     // borrarse — antes se borraban las 3 filas (% Real/% Acumulado/Meta %) por
-    // cualquier coincidencia de empresa_id, perdiendo la meta ya guardada.
+    // cualquier coincidencia de empresa_id, perdiendo la meta ya guardada. Este
+    // es exactamente el bug que le borró la Meta % (5%) a Terminal Bus el
+    // 2026-07-27 al subir el Excel antes de que "Cargar desde Sheets" terminara.
     const cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 3).getValues();
     const keys = new Set(data.filas.map(f => f[0] + '|' + f[2]));
     const toDelete = [];
@@ -109,11 +111,9 @@ function writeTrazabilidad(ss, data) {
   });
 }
 
-// FIX: antes borraba por prefijo de empresa completo (data.filas[0][0].split('_')[0]),
-// lo que eliminaba el histórico de objetivos de TODAS las sucursales/meses de Abastible
-// al sincronizar. Ahora borra solo las filas cuyo empresa_id+mes coincide exactamente
-// con lo que se está reinsertando (igual que writeTrazabilidad y que la corrección ya
-// aplicada en Socovesa).
+// Borra solo las filas cuyo empresa_id+mes coincide exactamente con lo que
+// se esta reinsertando (no por prefijo de empresa completo), para no perder
+// historico de objetivos de otras sucursales/meses al sincronizar.
 function writeObjetivos(ss, data) {
   const sheet = ss.getSheetByName('🎯 Objetivos') || ss.getSheetByName('Objetivos');
   if (!sheet) throw new Error('Hoja Objetivos no encontrada');
@@ -132,12 +132,13 @@ function writeObjetivos(ss, data) {
   });
 }
 
-// ── NUEVO: Total Residuos ──
+// ── Total Residuos + RESPEL ──
 
 // Busca en la columna A la fila cuyo valor sea exactamente "valorEsperado"
-// (ej. "Sucursal") y devuelve el número de fila (1-indexed). Evita asumir
-// que el header está en una fila fija, ya que "Total Residuos" no tiene
-// las filas decorativas de título que sí tienen las hojas principales.
+// (ej. "Sucursal" o "Residuo") y devuelve el numero de fila (1-indexed).
+// Evita asumir que el header esta en una fila fija, ya que estas 2 hojas
+// no tienen las filas decorativas de titulo/instrucciones que si tienen
+// las 3 hojas principales.
 function buscarFilaEncabezado_(sheet, valorEsperado) {
   var lastRow = Math.min(sheet.getLastRow(), 20);
   if (lastRow < 1) return null;
@@ -149,8 +150,8 @@ function buscarFilaEncabezado_(sheet, valorEsperado) {
 }
 
 // Reemplaza TODAS las filas de datos de "Total Residuos" por las que manda
-// el cliente. El cliente siempre envía el set completo vigente (calculado
-// desde el Excel cargado), así que no hace falta borrado selectivo por
+// el cliente. El cliente siempre envia el set completo vigente (calculado
+// desde el Excel cargado), asi que no hace falta borrado selectivo por
 // empresa_id como en writeValorizacion (esta hoja no tiene esa columna).
 function writeTotalResiduos(ss, data) {
   var sheet = ss.getSheetByName('Total Residuos');
@@ -158,7 +159,7 @@ function writeTotalResiduos(ss, data) {
   var headerRow = buscarFilaEncabezado_(sheet, 'Sucursal');
   if (!headerRow) throw new Error('No se encontro la fila de encabezado ("Sucursal") en Total Residuos');
   var startRow = headerRow + 1;
-  var numCols = 8; // Sucursal | Mes | Residuo | Valorizado/No Valorizado | Respel no respel | Total KG | Total M3 | Tons. CO2eq. evitadas
+  var numCols = 7; // Sucursal | Mes | Residuo | Valorizado/No Valorizado | Respel no respel | Total KG | Total M3
   var lastRow = sheet.getLastRow();
   if (lastRow >= startRow) {
     sheet.getRange(startRow, 1, lastRow - startRow + 1, numCols).clearContent();
@@ -166,6 +167,26 @@ function writeTotalResiduos(ss, data) {
   if (data.filas && data.filas.length > 0) {
     sheet.getRange(startRow, 1, data.filas.length, data.filas[0].length).setValues(data.filas);
   }
+}
+
+// Lee la hoja RESPEL (Residuo -> TRUE/FALSE) como array de objetos, igual
+// formato que las otras hojas.
+function readRespelSheet_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('RESPEL');
+  if (!sheet) return [];
+  var headerRow = buscarFilaEncabezado_(sheet, 'Residuo');
+  if (!headerRow) return [];
+  var startRow = headerRow + 1;
+  var lastRow = sheet.getLastRow();
+  if (lastRow < startRow) return [];
+  var headers = sheet.getRange(headerRow, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var data = sheet.getRange(startRow, 1, lastRow - startRow + 1, sheet.getLastColumn()).getValues();
+  return data.filter(function (r) { return r[0] !== ''; }).map(function (r) {
+    var obj = {};
+    headers.forEach(function (h, i) { if (h) obj[h] = r[i]; });
+    return obj;
+  });
 }
 
 function doGet(e) {
@@ -187,7 +208,8 @@ function doGet(e) {
   const result = {
     valorizacion: readSheet('♻️ Valorización') || readSheet('Valorización'),
     trazabilidad: readSheet('📊 Trazabilidad_Docs') || readSheet('Trazabilidad_Docs'),
-    objetivos: readSheet('🎯 Objetivos') || readSheet('Objetivos')
+    objetivos: readSheet('🎯 Objetivos') || readSheet('Objetivos'),
+    respel: readRespelSheet_()
   };
 
   return ContentService

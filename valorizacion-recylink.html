@@ -165,6 +165,7 @@ tbody tr:hover{background:var(--surface2)}
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
         <div class="filters" style="margin-bottom:0">
           <label>Sucursal</label><select id="f-obj-suc"></select>
+          <label>Año</label><select id="f-obj-anio"></select>
           <label>Mes</label><select id="f-obj-mes"></select>
         </div>
         <button class="btn btn-ghost" id="btn-editar-metas" style="display:none">&#9998; Editar metas</button>
@@ -297,6 +298,26 @@ var EMPRESAS = {
       {id:'sinader',      nombre:'Declarar mensualmente en SINADER', tipo:'sinader'},
       {id:'reg_valorizar',nombre:'Registrar residuos a valorizar', tipo:'reg_valorizar'},
       {id:'respel',       nombre:'Registrar retiros de Respel',   tipo:'respel'}
+    ]
+  },
+  ando: {
+    nombre: 'Ando',
+    scriptUrl: 'https://script.google.com/macros/s/AKfycbxDXNb5jL5CsJDEUy71c8fARsoXB3ZzuEBs4Z9zEa7ZQhLBgvuDcWmUNAOa_VIxdTg/exec',
+    prefix: 'ando',
+    trazCols: [
+      {header:'Sucursal',key:'suc'},{header:'Mes',key:'mes'},{header:'Residuo',key:'residuo'},
+      {header:'Cod. LER',key:'ler'},{header:'Imp.',key:'imp'},{header:'Cert. trat.',key:'cert'},
+      {header:'Factura',key:'factura'},{header:'Cert. decl.',key:'decl'},
+      {header:'Transportista',key:'transp'},{header:'Disp. final',key:'disp'}
+    ],
+    trazDocsCompletos: ['transp','disp'],
+    trazDocsInfo: ['cert','factura','decl'],
+    objetivos: [
+      {id:'trazabilidad',    nombre:'100% trazabilidad',                                              tipo:'trazabilidad'},
+      {id:'sinader',         nombre:'Cumplimiento normativa SINADER',                                  tipo:'sinader'},
+      {id:'sensibilizacion', nombre:'Generar sensibilización, concientización y cultura ambiental',    tipo:'manual'},
+      {id:'valorizar_peso',  nombre:'Valorizar un 5% de residuos en peso',                              tipo:'manual'},
+      {id:'kpi_costo',       nombre:'Incorporar KPI de costo - valorización',                          tipo:'kpi_costo'}
     ]
   }
 };
@@ -435,6 +456,15 @@ function populateSel(id, items, allLabel) {
   });
 }
 
+// Repuebla el select de mes del visor de Objetivos con solo los meses del
+// año actualmente elegido en f-obj-anio (evita mezclar meses de otro año).
+function refreshObjMesOptions() {
+  var fA = document.getElementById('f-obj-anio').value;
+  var mesesAnio = mesesDisp.filter(function(m){ return m.slice(0,4)===fA; });
+  var mesItemsAnio = mesesAnio.map(function(m){ return {v:m, l:MES_L[parseInt(m.slice(5))-1]}; });
+  populateSel('f-obj-mes', mesItemsAnio, 'Todos');
+}
+
 // Tabs
 document.querySelectorAll('.tab').forEach(function(btn) {
   btn.addEventListener('click', function() {
@@ -518,7 +548,8 @@ function processData(rows, fname) {
   var esGespania = empresaActual === 'gespania';
   var esSalfa = empresaActual === 'salfa';
   var esEuro = empresaActual === 'euro';
-  var generaTotalResiduos = esCopec || esAbastible || esGespania || esSalfa || esEuro;
+  var esAndo = empresaActual === 'ando';
+  var generaTotalResiduos = esCopec || esAbastible || esGespania || esSalfa || esEuro || esAndo;
 
   rows.forEach(function(r) {
     var suc = r['Sucursal']||'';
@@ -534,12 +565,14 @@ function processData(rows, fname) {
     var estado = (r['Estado']||r['estado']||'').toLowerCase().trim();
     var valorizado = isValorizado(trat);
     var respel = generaTotalResiduos && isRespel(residuo);
+    var co2 = parseFloat(r['Tons. CO2eq. evitadas'])||0;
 
     if (generaTotalResiduos) {
       var trKey = suc+'||'+mes+'||'+residuo+'||'+(valorizado?'V':'N')+'||'+(respel?'R':'X');
-      if (!trMap[trKey]) trMap[trKey] = {suc:suc,mes:mes,residuo:residuo,valorizado:valorizado,respel:respel,kg:0,m3:0};
+      if (!trMap[trKey]) trMap[trKey] = {suc:suc,mes:mes,residuo:residuo,valorizado:valorizado,respel:respel,kg:0,m3:0,co2:0};
       trMap[trKey].kg += kg;
       trMap[trKey].m3 += m3;
+      trMap[trKey].co2 += co2;
     }
 
     if (!valMatrix[suc]) valMatrix[suc]={};
@@ -597,7 +630,10 @@ function processData(rows, fname) {
   populateSel('f-traz-mes', mesItems, 'Todos');
   var sucObj = sucursales.filter(function(s){ return !isSucExcluida(s); });
   populateSel('f-obj-suc', sucObj, 'Todas');
-  populateSel('f-obj-mes', mesItems, 'Todos');
+  var aniosDisp = Array.from(new Set(mesesDisp.map(function(m){ return m.slice(0,4); }))).sort();
+  populateSel('f-obj-anio', aniosDisp, null);
+  if (aniosDisp.length) document.getElementById('f-obj-anio').value = aniosDisp[aniosDisp.length-1];
+  refreshObjMesOptions();
 
   document.getElementById('empresa-sub').textContent=EMPRESAS[empresaActual].nombre+' - '+rows.length+' operaciones - '+sucursales.length+' sucursales';
   document.getElementById('val-empty').style.display='none';
@@ -625,7 +661,7 @@ function autoSync(rows) {
   var emp = EMPRESAS[empresaActual];
 
   // Preparar payload valorización
-  var metasActuales = empresaActual === 'copec' ? getCopecMetas() : empresaActual === 'abastible' ? ABASTIBLE_METAS : (empresaActual === 'gespania' || empresaActual === 'salfa' || empresaActual === 'euro') ? metasFromSheets : {};
+  var metasActuales = empresaActual === 'copec' ? getCopecMetas() : empresaActual === 'abastible' ? ABASTIBLE_METAS : (empresaActual === 'gespania' || empresaActual === 'salfa' || empresaActual === 'euro' || empresaActual === 'ando') ? metasFromSheets : {};
   var filasVal = [];
   sucursales.forEach(function(suc){
     var id = sucId(suc);
@@ -633,24 +669,37 @@ function autoSync(rows) {
     filasVal.push([id,suc,'% Real'].concat(vals));
     var acums = mesesDisp.map(function(m){ var a=getAcum(suc,m); return a!==null?parseFloat(a.toFixed(1))+'%':''; });
     filasVal.push([id,suc,'% Acumulado'].concat(acums));
-    // Reenviar la meta actual (no vacia) para que writeValorizacion no la borre al reinsertar filas
-    var metaVal = metasActuales[suc] !== undefined ? metasActuales[suc]+'%' : '';
-    filasVal.push([id,suc,'Meta %'].concat(mesesDisp.map(function(){ return metaVal; })));
+    // Solo reenviar "Meta %" si se conoce un valor real. Si todavia no se cargo
+    // metasFromSheets (ej. se sube el Excel antes de que "Cargar desde Sheets"
+    // termine de resolver), no incluir esta fila: writeValorizacion ahora borra
+    // por empresa_id+Tipo, asi que omitirla deja intacta la meta ya guardada en
+    // el Sheet en vez de pisarla con un valor vacio.
+    if (metasActuales[suc] !== undefined) {
+      var metaVal = metasActuales[suc]+'%';
+      filasVal.push([id,suc,'Meta %'].concat(mesesDisp.map(function(){ return metaVal; })));
+    }
   });
 
-  // Total Residuos (Copec, Abastible, Gespania, Salfa y Euro): Sucursal | Mes | Residuo | Valorizado/No Valorizado | Respel no respel | Total KG | Total M3
+  // Total Residuos (Copec, Abastible, Gespania, Salfa, Euro y Ando): Sucursal | Mes | Residuo | Valorizado/No Valorizado | Respel no respel | Total KG | Total M3 [| Tons. CO2eq. evitadas]
+  // Año (col. B) y Tons. CO2eq. evitadas son exclusivos de Euro y del grupo original
+  // (Copec/Abastible/Gespania/Salfa/Euro) respectivamente — Ando no usa ninguna de las 2.
   var filasTotalResiduos = [];
-  if (empresaActual === 'copec' || empresaActual === 'abastible' || empresaActual === 'gespania' || empresaActual === 'salfa' || empresaActual === 'euro') {
+  if (empresaActual === 'copec' || empresaActual === 'abastible' || empresaActual === 'gespania' || empresaActual === 'salfa' || empresaActual === 'euro' || empresaActual === 'ando') {
+    var generaAnioTR = empresaActual === 'euro';
+    var generaCO2TR = empresaActual === 'copec' || empresaActual === 'abastible' || empresaActual === 'gespania' || empresaActual === 'salfa' || empresaActual === 'euro';
     filasTotalResiduos = totalResiduosRows.map(function(r){
-      return [
-        r.suc,
+      var row = [r.suc];
+      if (generaAnioTR) row.push(r.mes.slice(0,4));
+      row.push(
         MESES_ES[parseInt(r.mes.slice(5))],
         r.residuo,
         r.valorizado ? 'Valorizado' : 'No Valorizado',
         r.respel ? 'Respel' : 'No respel',
         parseFloat(r.kg.toFixed(2)),
         parseFloat(r.m3.toFixed(2))
-      ];
+      );
+      if (generaCO2TR) row.push(parseFloat(r.co2.toFixed(2)));
+      return row;
     });
   }
 
@@ -715,11 +764,12 @@ function getPct(suc,mes){
   if(d.fromSheets) return d.val; // val ya es el porcentaje
   return d.val/d.total*100;
 }
-function getAcum(suc,upTo){
-  if (acumFromSheets[suc] && acumFromSheets[suc][upTo] !== undefined) return acumFromSheets[suc][upTo];
+function getAcum(suc,upTo,anio){
+  if (!anio && acumFromSheets[suc] && acumFromSheets[suc][upTo] !== undefined) return acumFromSheets[suc][upTo];
   var tot=0,val=0;
   var hasSheets=false;
   Object.keys(valMatrix[suc]||{}).forEach(function(m){
+    if(anio && m.slice(0,4)!==anio) return;
     if(m<=upTo){
       var d=valMatrix[suc][m];
       if(d.fromSheets){ hasSheets=true; tot+=100; val+=d.val; }
@@ -922,15 +972,22 @@ document.getElementById('f-traz-suc').addEventListener('change',renderTraz);
 document.getElementById('f-traz-mes').addEventListener('change',renderTraz);
 
 // Objetivos
-function calcObjetivos() {
+function calcObjetivos(anio) {
   var emp=EMPRESAS[empresaActual];
   if(!emp.objetivos)return[];
   var results=[];
 
-  // Solo operaciones finalizadas con nombre normalizado
+  // Solo operaciones finalizadas con nombre normalizado, y del año pedido
+  // (si se pasa uno) — afecta sobre todo a los objetivos anuales mas abajo,
+  // que si no se acotan por año suman datos de todos los años juntos.
   var rowsFin = rawRows.filter(function(r){
     var est = (r['Estado']||r['estado']||'').toLowerCase().trim();
-    return est === 'finalizada' || est === 'finalizado';
+    if (est !== 'finalizada' && est !== 'finalizado') return false;
+    if (anio) {
+      var ym = toYM(r['Fecha de Operacion']||r['Fecha de Operación']||r['Fecha de operación']||'');
+      if (!ym || ym.slice(0,4) !== anio) return false;
+    }
+    return true;
   }).map(function(r){
     var copy = Object.assign({}, r);
     var s = copy['Sucursal']||'';
@@ -1230,6 +1287,10 @@ function renderObjetivos() {
 document.getElementById('f-obj-suc').addEventListener('change', function() {
   renderCopecObjetivos();
 });
+document.getElementById('f-obj-anio').addEventListener('change', function() {
+  refreshObjMesOptions();
+  renderCopecObjetivos();
+});
 document.getElementById('f-obj-mes').addEventListener('change', function() {
   renderCopecObjetivos();
 });
@@ -1237,6 +1298,10 @@ document.getElementById('f-obj-mes').addEventListener('change', function() {
 // Cargar desde Sheets
 function loadFromSheets() {
   var emp = EMPRESAS[empresaActual];
+  // Capturar la empresa ANTES de lanzar el fetch (no dentro del .then/loadSheetsData):
+  // si el usuario cambia de empresa mientras esta llamada sigue en el aire, la respuesta
+  // llega tarde y no debe pisar los datos de la empresa que esta activa ahora.
+  var empresaAlIniciar = empresaActual;
   var dot = document.getElementById('sync-dot');
   var msg = document.getElementById('sync-msg');
   dot.className = 'dot syncing';
@@ -1246,6 +1311,7 @@ function loadFromSheets() {
   fetch(emp.scriptUrl, {method:'GET', mode:'cors'})
     .then(function(r){ return r.json(); })
     .then(function(data) {
+      if (empresaActual !== empresaAlIniciar) return; // la empresa activa cambió mientras cargaba
       if (!data) throw new Error('Sin datos en el Sheet');
       // Normalizar arrays null a vacíos
       data.valorizacion = data.valorizacion || [];
@@ -1260,6 +1326,7 @@ function loadFromSheets() {
       toast('Datos cargados desde Google Sheets');
     })
     .catch(function(err) {
+      if (empresaActual !== empresaAlIniciar) return; // idem, no mostrar error de una empresa que ya no está activa
       dot.className = 'dot error';
       msg.textContent = 'Error: ' + err.message;
       toast('Error: ' + err.message, 'err');
@@ -1273,7 +1340,6 @@ function loadFromSheets() {
 function loadSheetsData(data) {
   try {
   var emp = EMPRESAS[empresaActual];
-  var empresaAlCargar = empresaActual; // Guardar empresa actual para verificar después
   valMatrix = {};
   trazRows = [];
   rawRows = [];
@@ -1412,12 +1478,12 @@ function loadSheetsData(data) {
     if (sucObjFromSheet.length > 0) sucObj = sucObjFromSheet;
   }
   populateSel('f-obj-suc', sucObj, 'Todas');
-  populateSel('f-obj-mes', mesItems, 'Todos');
+  var aniosDisp = Array.from(new Set(mesesDisp.map(function(m){ return m.slice(0,4); }))).sort();
+  populateSel('f-obj-anio', aniosDisp, null);
+  if (aniosDisp.length) document.getElementById('f-obj-anio').value = aniosDisp[aniosDisp.length-1];
+  refreshObjMesOptions();
 
   document.getElementById('empresa-sub').textContent = emp.nombre + ' - cargado desde Sheets - ' + sucursales.length + ' sucursales';
-
-  // Verificar que la empresa no cambió durante la carga
-  if (empresaActual !== empresaAlCargar) return;
 
   document.getElementById('val-empty').style.display = 'none';
   document.getElementById('val-content').style.display = 'block';
@@ -1564,16 +1630,18 @@ function renderObjetivosFromSheets(rows) {
 // Objetivos con formato de tabla por mes (columnas Ene, Feb...) para Copec y Abastible
 function renderCopecObjetivos() {
   var fS = document.getElementById('f-obj-suc').value;
+  var fA = document.getElementById('f-obj-anio').value;
   var fM = document.getElementById('f-obj-mes').value;
   var grid = document.getElementById('obj-grid');
   grid.innerHTML = '';
   var emp = EMPRESAS[empresaActual];
-  var metas = empresaActual === 'copec' ? getCopecMetas() : (empresaActual === 'abastible' ? ABASTIBLE_METAS : ((empresaActual === 'gespania' || empresaActual === 'salfa' || empresaActual === 'euro') ? metasFromSheets : {}));
+  var metas = empresaActual === 'copec' ? getCopecMetas() : (empresaActual === 'abastible' ? ABASTIBLE_METAS : ((empresaActual === 'gespania' || empresaActual === 'salfa' || empresaActual === 'euro' || empresaActual === 'ando') ? metasFromSheets : {}));
   var sucsToShow = fS === 'all' ? sucursales : [fS];
-  var mesesToShow = fM === 'all' ? mesesDisp : [fM];
+  var mesesAnio = mesesDisp.filter(function(m){ return m.slice(0,4)===fA; });
+  var mesesToShow = fM === 'all' ? mesesAnio : [fM];
 
-  // Calcular todos los objetivos de una vez (desde Excel)
-  var allObjResults = rawRows.length > 0 ? calcObjetivos() : [];
+  // Calcular todos los objetivos de una vez (desde Excel), acotado al año elegido
+  var allObjResults = rawRows.length > 0 ? calcObjetivos(fA) : [];
   var objBySucMes = {};
   var objAnualBySuc = {};
   allObjResults.forEach(function(r){
@@ -1622,14 +1690,14 @@ function renderCopecObjetivos() {
 
   sucsToShow.forEach(function(suc) {
     var meta = metas[suc] !== undefined ? metas[suc] : null;
-    var acum = getAcum(suc, mesesDisp[mesesDisp.length-1]);
+    var acum = getAcum(suc, mesesAnio[mesesAnio.length-1], fA);
     var colorAcum = meta !== null
       ? (acum !== null && acum >= meta ? 'var(--green)' : acum !== null && acum >= meta*0.7 ? 'var(--yellow)' : 'var(--red)')
       : 'var(--text-muted)';
 
     // % global: (trazabilidad acumulada + cumplimiento val) / 2
     var trazScoreAll = 0, trazCountAll = 0;
-    mesesDisp.forEach(function(m) {
+    mesesAnio.forEach(function(m) {
       var r = objBySucMes[suc+'|'+m+'|100% trazabilidad'];
       if (r && r.estado) {
         var n = parseFloat((r.estado+'').replace(',','.').replace('%',''));
@@ -1707,7 +1775,7 @@ function renderCopecObjetivos() {
     trAcum.style.borderTop='1px solid var(--border)';
     var acumCells='<td style="padding:9px 12px;color:var(--text-muted);border-right:1px solid var(--border)">% Acumulado</td>';
     mesesToShow.forEach(function(m){
-      var a=getAcum(suc,m);
+      var a=getAcum(suc,m,fA);
       var color=a===null?'var(--text-muted)':meta!==null&&a>=meta?'var(--green)':meta!==null&&a>=meta*0.7?'var(--yellow)':'var(--red)';
       acumCells+='<td style="padding:9px 12px;text-align:center;border-left:1px solid var(--border)">'+(a!==null?'<span style="color:'+color+'">'+fmtPct(a)+'</span>':'--')+'</td>';
     });

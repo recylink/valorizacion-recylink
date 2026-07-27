@@ -163,7 +163,51 @@ permite hacer seguimiento de valorización de residuos y trazabilidad documental
   No afecta al visor (no lee esas hojas), es solo cosmético; queda a criterio del usuario
   limpiarlo.
 
-## Apps Script (estructura común a las 3 empresas originales; Gespania, Salfa y Euro siguen el mismo esquema)
+### Ando (agregada 2026-07-27)
+- Sheet ID: `1r4TtS9Gtrd83oZse8yABCHRg4V1lxgxoW6a3YCxbpk0`
+- `scriptUrl`: `https://script.google.com/macros/s/AKfycbxDXNb5jL5CsJDEUy71c8fARsoXB3ZzuEBs4Z9zEa7ZQhLBgvuDcWmUNAOa_VIxdTg/exec`
+  (desplegado 2026-07-27, corriendo `Code-Ando.gs`).
+- Sucursales: solo **ETB** (única fila en `Contactos` y en `♻️ Valorización`).
+- `trazDocsCompletos: ['transp','disp']`, `trazDocsInfo: ['cert','factura','decl']` (igual
+  que Copec/Euro/Salfa/Gespania).
+- `trazCols` NO incluye `Transportista (nombre)` (Ando no trae esa columna en su Sheet, a
+  diferencia de Abastible/Socovesa). La hoja `📊 Trazabilidad_Docs` real de Ando tiene una
+  columna extra al final, `Comentario por sucursal`, que no está en `trazCols` — como
+  `writeTrazabilidad` borra y reinserta la fila completa en cada sync, cualquier comentario
+  manual en esa columna se pierde al sincronizar. No se resolvió (ninguna otra empresa tiene
+  este patrón); si el usuario necesita conservarlo habría que agregar lógica especial a
+  `writeTrazabilidad` de Ando para no borrar esa columna.
+- Metas de valorización: vía `metasFromSheets` (no hardcodeadas) — el Sheet ya trae `Meta %`
+  = 5% fijo en todos los meses para ETB, consistente con el objetivo "Valorizar un 5% de
+  residuos en peso".
+- `generaTotalResiduos` incluye a Ando — el Sheet ya trae las pestañas `Total Residuos`
+  (7 columnas: `Sucursal | Mes | Residuo | Valorizado/No Valorizado | Respel no respel |
+  Total KG | Total M3`, `Code-Ando.gs` con `numCols = 7`) y `RESPEL` (ya completa, ~64
+  residuos mapeados). Ando **no** usa `Año` ni `Tons. CO2eq. evitadas` — ambas son
+  exclusivas de Euro/del grupo original respectivamente (decisión del usuario, 2026-07-27,
+  ver sección "Total Residuos + RESPEL" arriba), así que no hace falta agregar esos 2
+  headers al Sheet de Ando.
+- 5 objetivos (definidos en la hoja `Objetivos 2026` del Sheet, texto exacto):
+  1. `100% trazabilidad` — tipo `trazabilidad`, cálculo estándar
+  2. `Cumplimiento normativa SINADER` — tipo `sinader`, mismo cálculo que Abastible/Socovesa/etc.
+  3. `Generar sensibilización, concientización y cultura ambiental` — tipo `manual` (no hay
+     forma de calcular esto desde los datos de trazabilidad, se ingresa a mano en `🎯 Objetivos`)
+  4. `Valorizar un 5% de residuos en peso` — tipo `manual`, agregado por consistencia con la
+     hoja `Objetivos 2026` aunque en la práctica duplica el % Real/Meta 2026 ya mostrado
+     (mismo patrón que Gespania/Euro)
+  5. `Incorporar KPI de costo - valorización` — tipo `kpi_costo`, mismo cálculo que
+     Abastible/Salfa (OK si `Total Costo Neto de Transporte > 0` O `Precio por Venta de
+     Residuo > 0`)
+- La hoja `🎯 Objetivos` de Ando ya trae ~150 filas con `100% trazabilidad`/`Documentos
+  adicionales` calculados pero con `empresa_id`/`Sucursal`/`Mes` **vacíos** en todas —
+  parecen venir de otro sistema (el "Portal de Trazabilidad" general de Recylink, no de este
+  visor) y `readSheet()` del Apps Script las descarta (`r[0]!==''`), así que no afectan a la
+  app. La hoja `Empresas_Config` también trae filas de otras empresas del portal general
+  (Gespania, CTEC, Novatec, Obra Limpia, etc., con `meta_val` distinto al de esta app) —
+  igual que `Seguimiento_CSE`/`Config.Flat` de Euro, es una plantilla compartida y no la lee
+  el visor HTML.
+
+## Apps Script (estructura común a las 3 empresas originales; Gespania, Salfa, Euro y Ando siguen el mismo esquema)
 Cada empresa tiene su propio Google Sheet con 3 hojas, headers en fila 5, datos desde fila 6:
 - `♻️ Valorización` — columnas: `empresa_id | Sucursal | Tipo | Enero...Diciembre` (Tipo = "% Real" o "Meta %")
 - `📊 Trazabilidad_Docs` — columnas: `empresa_id | Sucursal | Mes | Residuo | Transportista(nombre) | Código LER | Importaciones | Cert. tratamiento | Factura | Cert. declaración | Transportista | Disposición final`
@@ -221,14 +265,63 @@ Funciones del Apps Script (`doPost`, `doGet`):
 5. Sucursales duplicadas en el Sheet por cambios de nombre entre cargas (ej. "Olimpia III"
    → "Parque Olimpia III - Socovesa sur") requieren limpieza manual del Sheet + alias en `SUC_ALIAS`.
 6. La app solo funciona sirviéndose por HTTP (no `file://`) por CORS — pendiente subir a GitHub Pages.
+7. **Race condition al cambiar de empresa rápido** (encontrado y corregido 2026-07-27, reportado
+   por el usuario con Ando: `Error: Unexpected token '<'... no es JSON válido`, y por separado
+   sucursales de Copec mezcladas con las de Ando). `loadSheetsData()` capturaba
+   `empresaAlCargar = empresaActual` **dentro** de su propio callback (que corre síncronamente
+   dentro del `.then()` del fetch), así que la comparación de guarda al final siempre se
+   comparaba contra sí misma y nunca bloqueaba nada — si el usuario cambiaba de empresa
+   mientras un `fetch` anterior (ej. el auto-load de Copec al abrir la página) seguía en
+   vuelo, esa respuesta tardía igual mutaba `sucursales`/`mesesDisp`/`valMatrix`/los
+   `<select>` de la empresa que ya no estaba activa. Arreglado capturando
+   `empresaAlIniciar = empresaActual` en `loadFromSheets()` **antes** de lanzar el `fetch`, y
+   chequeando `empresaActual !== empresaAlIniciar` al inicio de los callbacks `.then()`/`.catch()`
+   (no al final de `loadSheetsData()`) — si la empresa activa cambió, la respuesta tardía se
+   descarta por completo, sin tocar ningún estado global.
+8. **`writeValorizacion` borraba la fila "Meta %" al subir un Excel** (encontrado 2026-07-27,
+   con Ando/Terminal Bus: la Meta % de 5% quedó vacía tras subir el Excel). Causa: `autoSync()`
+   siempre reenvía las 3 filas (% Real/% Acumulado/Meta %) por sucursal, pero si `metasFromSheets`
+   todavía no se cargó (ej. se sube el Excel antes de que "Cargar desde Sheets" —disparado al
+   seleccionar la empresa— termine de resolver), `metasActuales[suc]` es `undefined` y se
+   reenviaba una `Meta %` vacía. Como `writeValorizacion` en el Apps Script borraba TODAS las
+   filas que compartieran `empresa_id` (sin filtrar por `Tipo`), el reenvío de solo 2 filas
+   (% Real/% Acumulado) igual borraba la Meta % existente y la dejaba vacía. Arreglado en 2
+   partes: (a) `autoSync()` ahora omite la fila `Meta %` por completo cuando `metasActuales[suc]`
+   es `undefined`, en vez de mandarla vacía; (b) `writeValorizacion` (los 6 `.gs`) ahora borra por
+   `empresa_id+Tipo` (mismo patrón que `writeTrazabilidad`/`writeObjetivos`), no solo por
+   `empresa_id`, así que omitir una fila realmente la deja intacta en el Sheet en vez de
+   borrarla. **Pendiente:** redesplegar el `.gs` actualizado en las 6 empresas — los que ya
+   estaban en producción (Copec/Abastible/Socovesa/Gespania/Salfa/Euro/Ando) siguen con la
+   versión vieja y vulnerable hasta que se repegue el código. Mientras tanto, si a alguna
+   sucursal se le borró la Meta %, hay que volver a escribirla a mano en el Sheet.
 
 ## Total Residuos + RESPEL (Copec y Abastible desde 2026-07-24)
 El Sheet de Copec tiene 2 hojas adicionales a las 3 comunes, exclusivas de Copec:
-- `Total Residuos` — headers: `Sucursal | Mes | Residuo | Valorizado/No Valorizado | Respel no respel | Total KG | Total M3`.
-  Una fila por combinación única Sucursal+Mes+Residuo+Valorizado/No Valorizado+Respel/No Respel
+- `Total Residuos` — headers: `Sucursal | Mes | Residuo | Valorizado/No Valorizado | Respel no respel | Total KG | Total M3 | Tons. CO2eq. evitadas`
+  (Copec/Abastible/Gespania/Salfa/Euro) — Euro además tiene una columna `Año` extra en la
+  posición B (`Sucursal | Año | Mes | ...`), exclusiva de esa empresa (ver más abajo). Una
+  fila por combinación única Sucursal+Mes+Residuo+Valorizado/No Valorizado+Respel/No Respel
   (un mismo residuo puede generar 2 filas en un mes si tuvo operaciones valorizadas y no valorizadas).
   Se llena automáticamente desde el Excel de trazabilidad (`processData()` en el JS), igual que
   ♻️ Valorización y 📊 Trazabilidad_Docs — no se llena a mano.
+
+**Tons. CO2eq. evitadas** (agregada 2026-07-27): última columna, no se calcula — viene
+directamente del Excel de trazabilidad en la columna `Tons. CO2eq. evitadas` (ya expresada en
+toneladas por el sistema origen — el nombre de columna real del Excel no coincidía con lo que
+leía el código, `Ton CO2 eq evitadas`, corregido el 2026-07-27 tras confirmarlo con el usuario).
+`processData()` la suma por `trKey` igual que kg/m3 (mismo agrupamiento por
+Sucursal+Mes+Residuo+Valorizado+Respel). Aplica a Copec, Abastible, Gespania, Salfa y Euro —
+**no** a Ando (agregada después, ver sección "Ando" más abajo), `writeTotalResiduos` de esas 5
+sigue con `numCols = 8`.
+
+**Año** (agregada 2026-07-27, **exclusiva de Euro** — decisión tomada el mismo día tras
+confirmar con el usuario que no aplica a las demás empresas): columna 2 (B) solo en el Sheet
+de Euro, calculada en `autoSync()` como `r.mes.slice(0,4)` (el `mes` interno sigue siendo
+`"YYYY-MM"`, solo se toma la parte del año) y solo cuando `empresaActual==='euro'` (variable
+`generaAnioTR` en `autoSync()`). Motivada porque el Sheet de Euro ya traía esta columna
+agregada a mano en su pestaña `Total Residuos` pero quedaba siempre vacía. `Code-Euro.gs` es
+el único de los 5/6 `.gs` con `numCols = 9`; los demás (Copec/Abastible/Gespania/Salfa) quedan
+en `numCols = 8` (con CO2eq, sin Año) y Ando en `numCols = 7` (sin ninguna de las 2).
 - `RESPEL` — headers: `Residuo | RESPEL` (TRUE/FALSE), ~55 residuos mapeados. Fuente de verdad para
   clasificar qué residuos son Respel. Se lee vía `doGet` y se cachea en `respelSet` (JS). Si `respelSet`
   está vacío (Sheet aún no cargado), `isRespel()` cae a un fallback por nombre (substring "respel").
@@ -272,13 +365,62 @@ Falta agregar en `doGetClasico_`/`doPost`:
 - Código completo y listo para copiar/pegar (Code.gs fusionado con estos 3 cambios ya
   integrados) en `Code.gs` en la raíz del repo.
 
+## Selector de Año en el visor de Objetivos (agregado 2026-07-27)
+Antes de este cambio, `mesesDisp` mezclaba `"YYYY-MM"` de todos los años presentes en el Excel
+cargado sin distinguirlos, así que si un Excel tenía datos de 2 años, el % Acumulado (`getAcum()`)
+y los objetivos anuales de "Análisis anual" (`calcObjetivos()`, bloque `OBJ_ANUALES`) sumaban ambos
+años juntos — bug notado en el Sheet de Euro, donde `Total Residuos` mostraba meses (Julio,
+Agosto...) sin año que los distinguiera.
+
+- Nuevo `<select id="f-obj-anio">` en la pestaña Objetivos (junto a `f-obj-suc`/`f-obj-mes`), sin
+  opción "Todos" — siempre hay un año concreto seleccionado (el más reciente por defecto).
+- `refreshObjMesOptions()` (nueva función, junto a `populateSel`) repuebla `f-obj-mes` con solo los
+  meses del año activo cada vez que cambia `f-obj-anio`, para que los 2 selects nunca queden
+  contradictorios (año elegido vs. mes de otro año).
+- `calcObjetivos(anio)` ahora acepta un año opcional: si viene, filtra `rowsFin` (y por lo tanto los
+  objetivos anuales `valorizar_residuo/reg_valorizar/respel/valorizar_especificos`) a solo ese año.
+  El bloque mensual no necesitó cambios porque ya itera por `mes` exacto y el renderer filtra las
+  columnas a mostrar.
+- `getAcum(suc, upTo, anio)` ahora acepta un tercer parámetro opcional: si viene, acota la suma
+  acumulada a los meses de ese año (y no usa el atajo `acumFromSheets`, que no está acotado por
+  año). Sin `anio`, el comportamiento es idéntico al de antes — los demás call sites (`renderVal`,
+  `renderChart`, payloads de sync) no se tocaron a propósito, el pedido era solo para el visor de
+  Objetivos.
+- `renderCopecObjetivos()` (el único renderer de Objetivos realmente usado, para las 6 empresas —
+  `renderObjetivos()` y `renderObjetivosFromSheets()` son código muerto, nunca se llaman) usa
+  `mesesAnio = mesesDisp.filter(m => m.slice(0,4)===fA)` en vez de `mesesDisp` para las columnas de
+  la tabla mensual, el acumulado del encabezado y el % global (trazabilidad+valorización) por
+  sucursal.
+- **Limitación conocida**: en el modo "Cargar desde Sheets" (sin Excel cargado), la hoja
+  `🎯 Objetivos` no guarda el año — el código reconstruye `mesKey` asumiendo siempre
+  `new Date().getFullYear()`. Ahí el selector de Año solo mostrará una opción (el año actual), sin
+  regresión respecto al comportamiento previo. Arreglarlo de fondo requeriría agregar una columna
+  Año también a `♻️ Valorización`/`🎯 Objetivos` y tocar `doGet`/`writeObjetivos` de las 6 empresas
+  — no se hizo, fuera de alcance de este pedido.
+
 ## Pendientes conocidos
+- [ ] **Urgente**: redesplegar el `.gs` actualizado (fix de `writeValorizacion` borrando la
+      Meta % — ver bug #8 arriba) en Copec, Abastible, Gespania, Salfa, Euro y Ando — los 6
+      archivos que vive en este repo. Hasta entonces, cualquier Excel que se suba antes de que
+      termine de cargar "Cargar desde Sheets" puede seguir borrando la Meta % guardada.
+      (Socovesa no tiene `.gs` en este repo — su Apps Script se mantiene aparte, no se tocó.)
+- [ ] Ando: volver a escribir "5%" a mano en la fila `Meta %` de `Terminal Bus` en
+      `♻️ Valorización` — se borró el 2026-07-27 por el bug #8 al subir el Excel real.
+- [ ] Agregar manualmente el header `Tons. CO2eq. evitadas` (columna H) en la pestaña
+      `Total Residuos` de los 5 Sheets ya existentes (Copec, Abastible, Gespania, Salfa, Euro) —
+      hoy solo tienen 7 columnas de header; el JS/Apps Script ya escriben 8 pero sin el header
+      la columna quedará sin nombre hasta agregarlo a mano.
 - [ ] Agregar al Apps Script de Copec el soporte para `tipo:'totalResiduos'` en `doPost` y el
       campo `respel` en `doGet` (ver sección "Total Residuos + RESPEL" arriba) — sin esto, el
       JS ya calcula todo pero la sincronización a esas 2 hojas fallará silenciosamente (`no-cors`
       no reporta error de HTTP).
+- [ ] Ando: probar carga de Excel end-to-end ahora que el Apps Script ya está desplegado, y confirmar
+      que "Cumplimiento normativa SINADER"/"Incorporar KPI de costo - valorización" calzan
+      con los datos reales (son los primeros objetivos de Ando con esos nombres exactos, y el
+      cálculo `sinader`/`kpi_costo` se reutilizó de Abastible/Salfa sin poder verificarlo
+      contra datos reales de Ando todavía).
 - [ ] Abastible: crear la pestaña `Total Residuos` en su Google Sheet (headers:
-      `Sucursal | Mes | Residuo | Valorizado/No Valorizado | Respel no respel | Total KG | Total M3`)
+      `Sucursal | Mes | Residuo | Valorizado/No Valorizado | Respel no respel | Total KG | Total M3 | Tons. CO2eq. evitadas`)
       y pegar `Code-Abastible.gs` (raíz del repo) completo en su Apps Script real, reemplazando
       el Code.gs actual — agrega soporte para `tipo:'totalResiduos'` y de paso corrige
       `writeObjetivos` (borraba por prefijo de empresa completo en vez de por sucursal+mes,
@@ -292,7 +434,7 @@ Falta agregar en `doGetClasico_`/`doPost`:
 - [ ] Validar visualmente el formato unificado de Objetivos en las 3 empresas tras los
       últimos cambios en `renderCopecObjetivos`
 - [ ] Gespania: verificar que las pestañas `Total Residuos` (headers: `Sucursal | Mes | Residuo
-      | Valorizado/No Valorizado | Respel no respel | Total KG | Total M3`) y `RESPEL` (headers:
+      | Valorizado/No Valorizado | Respel no respel | Total KG | Total M3 | Tons. CO2eq. evitadas`) y `RESPEL` (headers:
       `Residuo | RESPEL`) del Sheet ya tengan esos headers exactos — no se pudieron inspeccionar
       visualmente por una falla intermitente de la extensión de navegador durante el análisis
 - [ ] Gespania: probar "Cargar desde Sheets" end-to-end una vez desplegado el Apps Script, y
