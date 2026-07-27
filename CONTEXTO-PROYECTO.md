@@ -431,9 +431,26 @@ en vez de un encabezado con un mes-año distinto por columna:
   `Enero`.
 - `autoSync()` en el JS: para Euro (`esEuroVal`), en vez de una fila por Tipo cubriendo todo
   `mesesDisp`, genera `aniosDisp = Array.from(new Set(mesesDisp.map(m=>m.slice(0,4))))` y por cada
-  año una fila `[id,suc,'% Real',anio,...12 meses]` (y lo mismo para `% Acumulado`/`Meta %`). Usa
-  `getAcum(suc,mKey,anio)` (el parámetro `anio` ya existía, agregado el 2026-07-27 para el selector
-  de Objetivos) para que el acumulado no mezcle años. Las otras 6 empresas no cambian.
+  año una fila `[id,suc,'% Real',anio,...12 meses]` (y lo mismo para `% Acumulado`/`Meta %`). Las
+  otras 6 empresas no cambian.
+- **% Acumulado en Valorización SÍ arrastra años anteriores** (decisión tomada 2026-07-28, a
+  pedido explícito del usuario — distinto del selector de Año del visor de Objetivos, que
+  intencionalmente NO arrastra). Por eso la fila `% Acumulado` de `autoSync()` llama
+  `getAcum(suc,mKey)` **sin** el 3er argumento `anio` (a diferencia de `% Real`, que sí usa
+  `mKey` con año — pero `% Real` no es acumulativo, cada mes es independiente). El parámetro
+  `anio` de `getAcum()` (agregado 2026-07-27) sigue existiendo y se sigue usando tal cual en
+  `renderCopecObjetivos()` para el selector de Año — solo se dejó de usar en este único call
+  site de `autoSync()`.
+- **Bug encontrado y corregido en `getAcum()`** (2026-07-28): con el modo "Cargar desde Sheets",
+  cuando se pasaba `anio` (selector de Año en Objetivos), la función ignoraba por completo
+  `acumFromSheets` (el valor real ya calculado y guardado en el Sheet) y siempre recalculaba un
+  promedio simple de `% Real` mensual — mucho menos preciso, y con Euro (que no es kg-weighted
+  en su origen) daba números muy distintos (ej. Proyecto Departamental Junio 2026: Sheet decía
+  5,3%, la app mostraba 1,4% = promedio de Ene-Jun sin peso). Se corrigió sacando la condición
+  `!anio` del `if` — como `acumFromSheets[suc][upTo]` ya está indexado por mesKey `"YYYY-MM"`
+  (año incluido en la key), es siempre correcto usarlo si existe, se haya pasado `anio` o no. El
+  recálculo manual sigue como fallback solo para cuando no hay valor de Sheets (datos recién
+  subidos desde Excel).
 - `filasObj` en `autoSync()`: para Euro, inserta `r.mesKey.slice(0,4)` (o `''` para las filas
   anuales) como 4to elemento, calzando con la columna Año que el usuario ya agregó en D. No
   requiere cambios en `Code-Euro.gs` (`writeObjetivos` es agnóstico al largo de la fila).

@@ -679,7 +679,10 @@ function autoSync(rows) {
       aniosDisp.forEach(function(anio){
         var valsReal = MES_L.map(function(_,i){ var mKey=anio+'-'+String(i+1).padStart(2,'0'); var p=getPct(suc,mKey); return p!==null?parseFloat(p.toFixed(1))+'%':''; });
         filasVal.push([id,suc,'% Real',anio].concat(valsReal));
-        var valsAcum = MES_L.map(function(_,i){ var mKey=anio+'-'+String(i+1).padStart(2,'0'); var a=getAcum(suc,mKey,anio); return a!==null?parseFloat(a.toFixed(1))+'%':''; });
+        // Sin el 3er argumento (anio): a diferencia del selector de Año del visor
+        // de Objetivos, el % Acumulado que se sincroniza a Valorización SI debe
+        // arrastrar años anteriores (decision 2026-07-28, a pedido del usuario).
+        var valsAcum = MES_L.map(function(_,i){ var mKey=anio+'-'+String(i+1).padStart(2,'0'); var a=getAcum(suc,mKey); return a!==null?parseFloat(a.toFixed(1))+'%':''; });
         filasVal.push([id,suc,'% Acumulado',anio].concat(valsAcum));
         if (metasActuales[suc] !== undefined) {
           var metaValAnio = metasActuales[suc]+'%';
@@ -795,7 +798,12 @@ function getPct(suc,mes){
   return d.val/d.total*100;
 }
 function getAcum(suc,upTo,anio){
-  if (!anio && acumFromSheets[suc] && acumFromSheets[suc][upTo] !== undefined) return acumFromSheets[suc][upTo];
+  // acumFromSheets ya viene indexado por mesKey "YYYY-MM" (año incluido), asi que
+  // si hay un valor cacheado para ese mes exacto es siempre correcto usarlo tal
+  // cual, se haya pasado "anio" o no — recalcular a mano (mas abajo) es solo un
+  // fallback para cuando no hay valor de Sheets (ej. datos recien subidos desde
+  // Excel), y ademas es una aproximacion mas cruda (promedio simple de % Real).
+  if (acumFromSheets[suc] && acumFromSheets[suc][upTo] !== undefined) return acumFromSheets[suc][upTo];
   var tot=0,val=0;
   var hasSheets=false;
   Object.keys(valMatrix[suc]||{}).forEach(function(m){
