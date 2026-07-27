@@ -592,6 +592,10 @@ function processData(rows, fname) {
     var key = suc+'||'+mes+'||'+residuo;
     // Para trazabilidad y objetivos solo considerar operaciones finalizadas
     if (estado !== 'finalizada' && estado !== 'finalizado') return;
+    // Excavacion tampoco cuenta para trazabilidad, mismo criterio que el % de
+    // valorizacion (linea 584): en ninguna empresa debe afectar Importaciones/
+    // Documentos/100% trazabilidad/SINADER/KPI costo.
+    if (esExcavacion) return;
     // Una operacion de 0 kilos no cuenta para efectos de trazabilidad (no afecta
     // Importaciones/Documentos/100% trazabilidad ni Total Residuos ya la excluye
     // implicitamente al sumar 0).

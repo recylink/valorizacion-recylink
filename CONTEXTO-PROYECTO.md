@@ -350,6 +350,15 @@ que es solo para Copec. Las operaciones de Excavación no suman ni al total ni a
 `valMatrix`, así que no afectan `% Real`/`% Acumulado` de ninguna sucursal. Sigue sumando normalmente
 a `Total Residuos` (no se tocó esa parte).
 
+**Excavación excluida también de trazabilidad en TODAS las empresas** (corregido 2026-07-28):
+la exclusión de 2026-07-24 de arriba solo tocaba `valMatrix` (% valorización) — `trazMap` (la
+estructura que alimenta `trazRows`, y por lo tanto "100% trazabilidad"/"Documentos adicionales"/
+SINADER/KPI costo en `calcObjetivos()`) seguía contando las operaciones de Excavación como
+cualquier otra. Se agregó `if (esExcavacion) return;` justo después del filtro por Estado
+finalizado en `processData()` (antes del filtro de `kg === 0`), reutilizando la misma variable
+`esExcavacion` ya calculada para el % de valorización. Sigue sumando normalmente a
+`Total Residuos` (ese bloque corre antes de este `return` y no se tocó).
+
 **Apps Script pendiente de agregar manualmente** (no hay acceso de edición directa al proyecto
 de Apps Script desde aquí — vive en Google, no en este repo). El Code.gs real de Copec tiene
 DOS doGet fusionados: `doGetClasico_` (el que consume `valorizacion-recylink.html`, sin query
