@@ -730,7 +730,15 @@ function autoSync(rows) {
   }
 
   // Preparar payload trazabilidad
+  // Euro agregó una columna Año en D de 📊 Trazabilidad_Docs (entre Mes y Residuo).
+  // Se maneja aparte de emp.trazCols (que también gobierna la tabla que se ve en
+  // la pestaña Trazabilidad de la app) para no agregar esa columna ahí también —
+  // mismo criterio que Valorización/Objetivos: Año es solo para sincronización.
+  var esEuroTraz = empresaActual === 'euro';
   var filasTraz = trazRows.map(function(r){
+    if (esEuroTraz) {
+      return [sucId(r.suc), r.suc, MESES_ES[parseInt(r.mes.slice(5))], r.mes.slice(0,4), r.residuo, r.ler, r.imp, r.cert, r.factura, r.decl, r.transp, r.disp];
+    }
     var row = [sucId(r.suc)];
     emp.trazCols.forEach(function(col){
       if(col.key==='mes') row.push(MESES_ES[parseInt(r.mes.slice(5))]);
@@ -1463,10 +1471,11 @@ function loadSheetsData(data) {
       var r = {imp:0,cert:0,factura:0,decl:0,transp:0,disp:0,transpNombre:'',ler:''};
       r.suc = (row['Sucursal']||'')+'';
       var mesLabel = (row['Mes']||'')+'';
-      // Convertir mes label a mesKey YYYY-MM
+      // Convertir mes label a mesKey YYYY-MM. Si la fila trae columna "Año"
+      // (Euro), usar ese año real en vez de asumir el actual.
       var mesKey = null;
       Object.keys(MESES_ES).forEach(function(k){
-        if (MESES_ES[k] === mesLabel) mesKey = new Date().getFullYear() + '-' + String(k).padStart(2,'0');
+        if (MESES_ES[k] === mesLabel) mesKey = (row['Año'] || new Date().getFullYear()) + '-' + String(k).padStart(2,'0');
       });
       if (!mesKey || !r.suc) return;
       r.mes = mesKey;

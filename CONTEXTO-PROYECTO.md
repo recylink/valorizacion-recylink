@@ -458,6 +458,16 @@ en vez de un encabezado con un mes-año distinto por columna:
   ahora usan `row['Año'] || new Date().getFullYear()` en vez de asumir siempre el año actual — este
   cambio es general (no exclusivo de Euro), así que si en el futuro se agrega la columna Año a
   otra empresa, la lectura ya la va a aprovechar automáticamente sin tocar código de nuevo.
+- **Año también en `📊 Trazabilidad_Docs` de Euro** (agregado 2026-07-28), columna D (entre Mes
+  y Residuo — desplaza Residuo/Cod. LER/etc. una posición a la derecha). A diferencia de
+  Valorización/Objetivos, esto NO se maneja a través de `emp.trazCols` (que también gobierna la
+  tabla que se ve en la pestaña Trazabilidad de la app) — se hizo aparte en `autoSync()`
+  (variable `esEuroTraz`) para no agregar esa columna a la tabla visible, mismo criterio que las
+  otras 2 hojas: Año es solo para sincronización. `writeTrazabilidad` en `Code-Euro.gs` no
+  necesitó cambios: sigue borrando por `empresa_id+Mes` (índices 0 y 2 de la fila), y esos 2
+  índices no se movieron al insertar Año en el índice 3. La lectura (`loadSheetsData()`, bloque
+  de trazabilidad) también usa `row['Año'] || new Date().getFullYear()` ahora, mismo patrón
+  general que Valorización/Objetivos.
 
 ## Pendientes conocidos
 - [ ] **Euro**: arreglar el encabezado de `♻️ Valorización` en el Sheet real — hoy tiene ~34
