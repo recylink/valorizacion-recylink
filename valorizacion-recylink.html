@@ -168,7 +168,19 @@ tbody tr:hover{background:var(--surface2)}
           <label>Año</label><select id="f-obj-anio"></select>
           <label>Mes</label><select id="f-obj-mes"></select>
         </div>
+        <button class="btn btn-ghost" id="btn-gestionar-sucursales" style="display:none">&#127970; Sucursales cerradas</button>
         <button class="btn btn-ghost" id="btn-editar-metas" style="display:none">&#9998; Editar metas</button>
+      </div>
+      <div id="sucursales-form" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <span style="font-size:14px;font-weight:600;color:var(--text)">Sucursales cerradas</span>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost" id="btn-cancelar-sucursales">Cancelar</button>
+            <button class="btn btn-primary" id="btn-guardar-sucursales">Guardar</button>
+          </div>
+        </div>
+        <p style="font-size:12px;color:var(--text-muted);margin:0 0 14px">Marca las sucursales cerradas/dadas de baja: se ocultan de Valorización y Objetivos, pero siguen visibles en Trazabilidad (histórico).</p>
+        <div id="sucursales-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px"></div>
       </div>
       <div id="metas-form" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
@@ -319,12 +331,46 @@ var EMPRESAS = {
       {id:'valorizar_peso',  nombre:'Valorizar un 5% de residuos en peso',                              tipo:'manual'},
       {id:'kpi_costo',       nombre:'Incorporar KPI de costo - valorización',                          tipo:'kpi_costo'}
     ]
+  },
+  pms: {
+    nombre: 'PMS',
+    scriptUrl: 'https://script.google.com/macros/s/AKfycbxebFCdrIRxJVPzE3Rdo5hf_CZT9cpqIbszqQalGRTMa3v2aRedgwFTDfwkpWioXs9_/exec',
+    prefix: 'pms',
+    trazCols: [
+      {header:'Sucursal',key:'suc'},{header:'Mes',key:'mes'},{header:'Residuo',key:'residuo'},
+      {header:'Cod. LER',key:'ler'},{header:'Imp.',key:'imp'},{header:'Cert. trat.',key:'cert'},
+      {header:'Factura',key:'factura'},{header:'Cert. decl.',key:'decl'},
+      {header:'Transportista',key:'transp'},{header:'Disp. final',key:'disp'}
+    ],
+    trazDocsCompletos: ['transp','disp'],
+    trazDocsInfo: ['cert','factura','decl'],
+    objetivos: [
+      {id:'trazabilidad', nombre:'100% trazabilidad', tipo:'trazabilidad'}
+    ]
+  },
+  ccu: {
+    nombre: 'CCU',
+    scriptUrl: 'https://script.google.com/macros/s/AKfycbxZIqb5W8o0GWZqWIrG5s1Qg0R54Ij15U7MiT-GzgUmXjaYSCx10nTVu-h5W6mLDvj6/exec',
+    prefix: 'ccu',
+    trazCols: [
+      {header:'Sucursal',key:'suc'},{header:'Mes',key:'mes'},{header:'Residuo',key:'residuo'},
+      {header:'Cod. LER',key:'ler'},{header:'Imp.',key:'imp'},{header:'Cert. trat.',key:'cert'},
+      {header:'Factura',key:'factura'},{header:'Cert. decl.',key:'decl'},
+      {header:'Transportista',key:'transp'},{header:'Disp. final',key:'disp'}
+    ],
+    trazDocsCompletos: ['transp','disp'],
+    trazDocsInfo: ['cert','factura','decl'],
+    objetivos: [
+      {id:'trazabilidad',    nombre:'100% trazabilidad',          tipo:'trazabilidad'},
+      {id:'kpi_costo',       nombre:'Tener KPI Costo - Ingreso',   tipo:'kpi_costo'},
+      {id:'residuos_spot',   nombre:'Gestionar Residuos Spot',     tipo:'manual'}
+    ]
   }
 };
 
 var MES_L = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
 var MESES_ES = {1:'Enero',2:'Febrero',3:'Marzo',4:'Abril',5:'Mayo',6:'Junio',7:'Julio',8:'Agosto',9:'Septiembre',10:'Octubre',11:'Noviembre',12:'Diciembre'};
-var VALORIZADOS_LIST = ['Reciclaje','Coprocesamiento (Valorizado)','Reutilizacion','Reutilización','Compostaje','Donaciones','Vermicompostaje','Recauchaje','Gestion Interna','Gestión Interna'];
+var VALORIZADOS_LIST = ['Reciclaje','Coprocesamiento (Valorizado)','Reutilizacion','Reutilización','Compostaje','Donaciones','Vermicompostaje','Recauchaje','Gestion Interna','Gestión Interna','Producto Circular','Recuperación energética','Recuperacion energetica'];
 
 function isValorizado(trat) {
   if (!trat) return false;
@@ -384,8 +430,27 @@ var COPEC_METAS_DEFAULT = {
   'CDL 1240 - Santiago': 15
 };
 
+// CCU: metas fijas por sucursal (confirmadas por el usuario 2026-07-30, texto exacto
+// de nombre de sucursal tal como viene en el Excel).
+var CCU_METAS = {
+  'NPR - Embotelladora Renca': 96,
+  'CirCCUlar': 60
+};
+
 // Metas leidas de la hoja de Sheets (fila "Meta %"), fuente compartida entre navegadores/equipos.
 var metasFromSheets = {};
+
+// PMS: meta fija de 20% para todas las sucursales (objetivo "20% Valorización" de
+// Objetivos 2026, parejo para todas — a diferencia de Gespania/Salfa/Euro/Ando el
+// Sheet nunca tuvo una fila "Meta %" precargada a mano, asi que no hay nada que
+// leer via metasFromSheets. Mismo patron que Abastible (meta fija en el codigo),
+// pero generado dinamicamente porque las sucursales de PMS no estan hardcodeadas.
+var PMS_META_PCT = 20;
+function getPmsMetas() {
+  var metas = {};
+  sucursales.forEach(function(s){ metas[s] = PMS_META_PCT; });
+  return metas;
+}
 
 function getCopecMetas() {
   var stored = null;
@@ -413,10 +478,30 @@ function fmt(n,dec) { dec = dec||1; return n.toFixed(dec).replace('.',','); }
 function fmtPct(n) { return fmt(n)+'%'; }
 function fmtT(n) { return fmt(n)+'t'; }
 
-var SUCURSALES_EXCLUIDAS = ['Edificio Eliodoro Yañez','Edificio Eliodoro Yanez'];
+var SUCURSALES_EXCLUIDAS = ['Edificio Eliodoro Yañez','Edificio Eliodoro Yanez','NPR - Obra Nave 2 Planta Renca'];
+
+// Sucursales marcadas como "cerradas" desde el botón "Sucursales cerradas" de la app
+// (guardadas en localStorage, por empresa, ya que un mismo nombre de sucursal podria
+// repetirse entre empresas distintas). Se suman a SUCURSALES_EXCLUIDAS (que sigue
+// existiendo para casos ya conocidos que no requieren edicion desde la UI).
+function getSucursalesExcluidasUI() {
+  try {
+    var raw = localStorage.getItem('sucursales_excluidas');
+    var all = raw ? JSON.parse(raw) : {};
+    return all[empresaActual] || [];
+  } catch(e) { return []; }
+}
+function setSucursalesExcluidasUI(lista) {
+  var raw = localStorage.getItem('sucursales_excluidas');
+  var all = {};
+  try { all = raw ? JSON.parse(raw) : {}; } catch(e) { all = {}; }
+  all[empresaActual] = lista;
+  localStorage.setItem('sucursales_excluidas', JSON.stringify(all));
+}
 
 function isSucExcluida(suc) {
-  return SUCURSALES_EXCLUIDAS.some(function(e){ return suc.toLowerCase().indexOf(e.toLowerCase())>=0; });
+  if (SUCURSALES_EXCLUIDAS.some(function(e){ return suc.toLowerCase().indexOf(e.toLowerCase())>=0; })) return true;
+  return getSucursalesExcluidasUI().indexOf(suc) >= 0;
 }
 
 function toast(msg, type) {
@@ -513,6 +598,8 @@ function resetData() {
   document.getElementById('obj-empty').style.display = hasObj ? 'none' : '';
   document.getElementById('obj-content').style.display = hasObj ? 'block' : 'none';
   document.getElementById('btn-editar-metas').style.display = empresaActual==='copec' ? 'inline-flex' : 'none';
+  document.getElementById('btn-gestionar-sucursales').style.display = 'none';
+  document.getElementById('sucursales-form').style.display = 'none';
   document.getElementById('obj-grid').innerHTML = '';
   renderCopecObjetivos();
   
@@ -549,7 +636,9 @@ function processData(rows, fname) {
   var esSalfa = empresaActual === 'salfa';
   var esEuro = empresaActual === 'euro';
   var esAndo = empresaActual === 'ando';
-  var generaTotalResiduos = esCopec || esAbastible || esGespania || esSalfa || esEuro || esAndo;
+  var esPms = empresaActual === 'pms';
+  var esCcu = empresaActual === 'ccu';
+  var generaTotalResiduos = esCopec || esAbastible || esGespania || esSalfa || esEuro || esAndo || esPms || esCcu;
 
   rows.forEach(function(r) {
     var suc = r['Sucursal']||'';
@@ -598,15 +687,20 @@ function processData(rows, fname) {
     if (esExcavacion) return;
     // Una operacion de 0 kilos no cuenta para efectos de trazabilidad (no afecta
     // Importaciones/Documentos/100% trazabilidad ni Total Residuos ya la excluye
-    // implicitamente al sumar 0).
-    if (kg === 0) return;
+    // implicitamente al sumar 0). EXCEPCION PMS (decision del usuario 2026-07-30):
+    // para PMS estas operaciones SI cuentan como aporte a la trazabilidad, pero sin
+    // exigir transportista/disposicion final — se cuenta cuantas de esas hay por
+    // grupo (impCeroKg) para eximirlas mas abajo en calcObjetivos, mismo patron que
+    // la excepcion de Donaciones (donEnG).
+    if (kg === 0 && !esPms) return;
     if (!trazMap[key]) {
       var tn = (r['Razon Social Empresa Transportista']||r['Razón Social Empresa Transportista']||r['Nombre de Fantasía Empresa Transportista']||'').trim()
             || (r['RUT de Empresa Transportista']||'').trim();
-      trazMap[key]={suc:suc,mes:mes,residuo:residuo,ler:ler,transpNombre:tn,imp:0,cert:0,factura:0,decl:0,transp:0,disp:0,costoTotal:0,tieneIngreso:0};
+      trazMap[key]={suc:suc,mes:mes,residuo:residuo,ler:ler,transpNombre:tn,imp:0,cert:0,factura:0,decl:0,transp:0,disp:0,costoTotal:0,tieneIngreso:0,impCeroKg:0};
     }
     var g = trazMap[key];
     g.imp++;
+    if (esPms && kg === 0) g.impCeroKg++;
     if (r['(D) Certificado de Tratamiento']==='Si') g.cert++;
     if (r['(D) Factura de Compra']==='Si') g.factura++;
     if (r['(D) Declaracion Mensual SINADER']==='Si'||r['(D) Declaración Mensual SINADER']==='Si') g.decl++;
@@ -628,7 +722,8 @@ function processData(rows, fname) {
   mesesDisp = Object.keys(mesSet).sort();
 
   var mesItems = mesesDisp.map(function(m){ return {v:m,l:MES_L[parseInt(m.slice(5))-1]+' '+m.slice(0,4)}; });
-  populateSel('f-suc', sucursales, 'Todas');
+  var sucVal = sucursales.filter(function(s){ return !isSucExcluida(s); });
+  populateSel('f-suc', sucVal, 'Todas');
   populateSel('f-mes', mesItems, 'Todos');
   populateSel('f-traz-suc', sucursales, 'Todas');
   populateSel('f-traz-mes', mesItems, 'Todos');
@@ -648,6 +743,7 @@ function processData(rows, fname) {
   document.getElementById('obj-empty').style.display=hasObj?'none':'';
   document.getElementById('obj-content').style.display=hasObj?'block':'none';
   document.getElementById('btn-editar-metas').style.display=empresaActual==='copec'?'inline-flex':'none';
+  document.getElementById('btn-gestionar-sucursales').style.display=sucursales.length>0?'inline-flex':'none';
 
   document.getElementById('sync-dot').className='dot syncing';
   document.getElementById('sync-msg').textContent='Sincronizando con Google Sheets...';
@@ -665,7 +761,7 @@ function autoSync(rows) {
   var emp = EMPRESAS[empresaActual];
 
   // Preparar payload valorización
-  var metasActuales = empresaActual === 'copec' ? getCopecMetas() : empresaActual === 'abastible' ? ABASTIBLE_METAS : (empresaActual === 'gespania' || empresaActual === 'salfa' || empresaActual === 'euro' || empresaActual === 'ando') ? metasFromSheets : {};
+  var metasActuales = empresaActual === 'copec' ? getCopecMetas() : empresaActual === 'abastible' ? ABASTIBLE_METAS : empresaActual === 'pms' ? getPmsMetas() : empresaActual === 'ccu' ? CCU_METAS : (empresaActual === 'gespania' || empresaActual === 'salfa' || empresaActual === 'euro' || empresaActual === 'ando') ? metasFromSheets : {};
   var filasVal = [];
   // Euro: fila por Tipo POR AÑO (columna Año agregada a mano en la hoja, con
   // meses fijos Ene-Dic) en vez de un encabezado con un mes-año por columna —
@@ -710,7 +806,7 @@ function autoSync(rows) {
   // Año (col. B) y Tons. CO2eq. evitadas son exclusivos de Euro y del grupo original
   // (Copec/Abastible/Gespania/Salfa/Euro) respectivamente — Ando no usa ninguna de las 2.
   var filasTotalResiduos = [];
-  if (empresaActual === 'copec' || empresaActual === 'abastible' || empresaActual === 'gespania' || empresaActual === 'salfa' || empresaActual === 'euro' || empresaActual === 'ando') {
+  if (empresaActual === 'copec' || empresaActual === 'abastible' || empresaActual === 'gespania' || empresaActual === 'salfa' || empresaActual === 'euro' || empresaActual === 'ando' || empresaActual === 'pms' || empresaActual === 'ccu') {
     var generaAnioTR = empresaActual === 'euro';
     var generaCO2TR = empresaActual === 'copec' || empresaActual === 'abastible' || empresaActual === 'gespania' || empresaActual === 'salfa' || empresaActual === 'euro';
     filasTotalResiduos = totalResiduosRows.map(function(r){
@@ -835,11 +931,12 @@ function renderVal() {
   var existing = parent.querySelector('#val-grouped');
   if (existing) existing.remove();
 
-  var sucsToShow = fS==='all' ? sucursales : [fS];
+  var sucsVal = sucursales.filter(function(s){ return !isSucExcluida(s); });
+  var sucsToShow = fS==='all' ? sucsVal : [fS];
   var mesesToShow = fM==='all' ? mesesDisp : [fM];
 
   var tKg=0,tVal=0;
-  sucursales.forEach(function(suc){
+  sucsVal.forEach(function(suc){
     if (!valMatrix[suc]) return;
     Object.keys(valMatrix[suc]).sort().forEach(function(mes){
       var d=valMatrix[suc][mes]; tKg+=d.total; tVal+=d.val;
@@ -847,7 +944,7 @@ function renderVal() {
   });
   var pG=tKg>0?tVal/tKg*100:0;
   var cls=pG>=50?'good':pG>=20?'warn':'bad';
-  document.getElementById('metrics').innerHTML='<div class="metric"><div class="metric-label">Sucursales</div><div class="metric-val">'+sucursales.length+'</div></div><div class="metric"><div class="metric-label">Total (kg)</div><div class="metric-val">'+fmtT(tKg/1000)+'</div></div><div class="metric"><div class="metric-label">Valorizado (kg)</div><div class="metric-val">'+fmtT(tVal/1000)+'</div></div><div class="metric"><div class="metric-label">% Valorizacion global</div><div class="metric-val '+cls+'">'+fmtPct(pG)+'</div></div>';
+  document.getElementById('metrics').innerHTML='<div class="metric"><div class="metric-label">Sucursales</div><div class="metric-val">'+sucsVal.length+'</div></div><div class="metric"><div class="metric-label">Total (kg)</div><div class="metric-val">'+fmtT(tKg/1000)+'</div></div><div class="metric"><div class="metric-label">Valorizado (kg)</div><div class="metric-val">'+fmtT(tVal/1000)+'</div></div><div class="metric"><div class="metric-label">% Valorizacion global</div><div class="metric-val '+cls+'">'+fmtPct(pG)+'</div></div>';
 
   var wrap = document.createElement('div');
   wrap.id = 'val-grouped';
@@ -951,7 +1048,7 @@ function renderVal() {
 
 function renderChart() {
   var fS=document.getElementById('f-suc').value;
-  var sucs=fS==='all'?sucursales.slice(0,8):[fS];
+  var sucs=fS==='all'?sucursales.filter(function(s){ return !isSucExcluida(s); }).slice(0,8):[fS];
   var colors=['#2a78d6','#1baf7a','#d4900a','#008300','#4a3aa7','#dc2626','#e87ba4','#eb6834'];
   var datasets=sucs.map(function(suc,i){
     return {
@@ -1107,7 +1204,7 @@ function calcObjetivos(anio) {
             var donEnG=rowsFin.filter(function(rr){return rr['Sucursal']===r.suc&&toYM(rr['Fecha de Operacion']||rr['Fecha de Operación']||rr['Fecha de operación']||'')===r.mes&&rr['Residuo']===r.residuo&&rr['Tipo de Tratamiento']==='Donaciones';}).length;
             var allOk=docs.every(function(d){
               if(excluirTranspDisp && docsExcEspecial[d]) return true;
-              if(docsExcDon[d])return (r[d]+donEnG)>=r.imp;
+              if(docsExcDon[d])return (r[d]+donEnG+(empresaActual==='pms'?(r.impCeroKg||0):0))>=r.imp;
               return r[d]>=r.imp;
             });
             if(allOk)completas+=r.imp;
@@ -1123,7 +1220,7 @@ function calcObjetivos(anio) {
               var donEnG=rowsFin.filter(function(rr){return rr['Sucursal']===r.suc&&toYM(rr['Fecha de Operacion']||rr['Fecha de Operación']||rr['Fecha de operación']||'')===r.mes&&rr['Residuo']===r.residuo&&rr['Tipo de Tratamiento']==='Donaciones';}).length;
               var resOk=docs.every(function(d){
                 if(excluirTranspDisp && docsExcEspecial[d]) return true;
-                if(docsExcDon[d])return (r[d]+donEnG)>=r.imp;
+                if(docsExcDon[d])return (r[d]+donEnG+(empresaActual==='pms'?(r.impCeroKg||0):0))>=r.imp;
                 return r[d]>=r.imp;
               });
               if(resOk){
@@ -1131,7 +1228,7 @@ function calcObjetivos(anio) {
               } else {
                 docs.forEach(function(d){
                   if(excluirTranspDisp && docsExcEspecial[d]) return;
-                  var falt=docsExcDon[d]?Math.max(0,r.imp-(r[d]+donEnG)):Math.max(0,r.imp-(r[d]||0));
+                  var falt=docsExcDon[d]?Math.max(0,r.imp-(r[d]+donEnG+(empresaActual==='pms'?(r.impCeroKg||0):0))):Math.max(0,r.imp-(r[d]||0));
                   if(falt>0){
                     var k=r.residuo||'Sin nombre';
                     if(!gapsPorRes[k])gapsPorRes[k]=[];
@@ -1509,7 +1606,8 @@ function loadSheetsData(data) {
   }
 
   var mesItems = mesesDisp.map(function(m){ return {v:m, l:MES_L[parseInt(m.slice(5))-1]+' '+m.slice(0,4)}; });
-  populateSel('f-suc', sucursales, 'Todas');
+  var sucVal = sucursales.filter(function(s){ return !isSucExcluida(s); });
+  populateSel('f-suc', sucVal, 'Todas');
   populateSel('f-mes', mesItems, 'Todos');
   populateSel('f-traz-suc', sucursales, 'Todas');
   populateSel('f-traz-mes', mesItems, 'Todos');
@@ -1542,6 +1640,7 @@ function loadSheetsData(data) {
   document.getElementById('obj-content').style.display = hasObj || empresaActual === 'copec' || empresaActual === 'abastible' ? 'block' : 'none';
   document.getElementById('obj-empty').style.display = (hasObj || empresaActual === 'copec' || empresaActual === 'abastible') ? 'none' : '';
   document.getElementById('btn-editar-metas').style.display = empresaActual === 'copec' ? 'inline-flex' : 'none'; // Abastible no tiene metas editables
+  document.getElementById('btn-gestionar-sucursales').style.display = sucursales.length > 0 ? 'inline-flex' : 'none';
 
 
   renderTrazHeaders(); renderVal(); renderChart(); renderTraz();
@@ -1683,8 +1782,8 @@ function renderCopecObjetivos() {
   var grid = document.getElementById('obj-grid');
   grid.innerHTML = '';
   var emp = EMPRESAS[empresaActual];
-  var metas = empresaActual === 'copec' ? getCopecMetas() : (empresaActual === 'abastible' ? ABASTIBLE_METAS : ((empresaActual === 'gespania' || empresaActual === 'salfa' || empresaActual === 'euro' || empresaActual === 'ando') ? metasFromSheets : {}));
-  var sucsToShow = fS === 'all' ? sucursales : [fS];
+  var metas = empresaActual === 'copec' ? getCopecMetas() : (empresaActual === 'abastible' ? ABASTIBLE_METAS : (empresaActual === 'pms' ? getPmsMetas() : (empresaActual === 'ccu' ? CCU_METAS : ((empresaActual === 'gespania' || empresaActual === 'salfa' || empresaActual === 'euro' || empresaActual === 'ando') ? metasFromSheets : {}))));
+  var sucsToShow = fS === 'all' ? sucursales.filter(function(s){ return !isSucExcluida(s); }) : [fS];
   var mesesAnio = mesesDisp.filter(function(m){ return m.slice(0,4)===fA; });
   var mesesToShow = fM === 'all' ? mesesAnio : [fM];
 
@@ -1945,6 +2044,48 @@ function renderCopecObjetivos() {
 }
 
 
+
+// Repuebla selects afectados por isSucExcluida() y vuelve a renderizar Valorización/Objetivos,
+// para que marcar/desmarcar una sucursal como cerrada se refleje al instante sin recargar.
+function refreshSucursalesExcluidas() {
+  var sucVisibles = sucursales.filter(function(s){ return !isSucExcluida(s); });
+  populateSel('f-suc', sucVisibles, 'Todas');
+  populateSel('f-obj-suc', sucVisibles, 'Todas');
+  renderVal();
+  renderChart();
+  renderCopecObjetivos();
+}
+
+function openSucursalesEditor() {
+  var excluidas = getSucursalesExcluidasUI();
+  var grid = document.getElementById('sucursales-grid');
+  grid.innerHTML = '';
+  sucursales.forEach(function(suc) {
+    var checked = excluidas.indexOf(suc) >= 0;
+    var forzada = SUCURSALES_EXCLUIDAS.some(function(e){ return suc.toLowerCase().indexOf(e.toLowerCase())>=0; });
+    var div = document.createElement('label');
+    div.style.cssText = 'display:flex;align-items:center;gap:8px;cursor:'+(forzada?'default':'pointer');
+    div.innerHTML = '<input type="checkbox" data-suc="'+suc.replace(/"/g,'&quot;')+'" '+(checked||forzada?'checked':'')+(forzada?' disabled':'')+'>'
+      + '<span style="font-size:12px;color:var(--text-sec);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+suc+'">'+suc+(forzada?' (fija en el código)':'')+'</span>';
+    grid.appendChild(div);
+  });
+  document.getElementById('sucursales-form').style.display = 'block';
+}
+
+document.getElementById('btn-gestionar-sucursales').addEventListener('click', openSucursalesEditor);
+document.getElementById('btn-cancelar-sucursales').addEventListener('click', function() {
+  document.getElementById('sucursales-form').style.display = 'none';
+});
+document.getElementById('btn-guardar-sucursales').addEventListener('click', function() {
+  var excluidas = [];
+  document.querySelectorAll('#sucursales-grid input[data-suc]').forEach(function(inp) {
+    if (inp.checked && !inp.disabled) excluidas.push(inp.getAttribute('data-suc'));
+  });
+  setSucursalesExcluidasUI(excluidas);
+  document.getElementById('sucursales-form').style.display = 'none';
+  refreshSucursalesExcluidas();
+  toast('Sucursales cerradas guardadas');
+});
 
 function openMetasEditor() {
   var metas = getCopecMetas();

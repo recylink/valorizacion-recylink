@@ -207,6 +207,142 @@ permite hacer seguimiento de valorización de residuos y trazabilidad documental
   igual que `Seguimiento_CSE`/`Config.Flat` de Euro, es una plantilla compartida y no la lee
   el visor HTML.
 
+### PMS (agregada 2026-07-30)
+- Sheet ID: `1q1T543MVj9eA4bjbaysIRpr3eGf0fB_J5B1PekGBo6A` (título "PMS" en Drive, creado
+  2026-07-30 — clon vacío de la plantilla "Portal de Trazabilidad", igual punto de partida
+  que tuvieron Euro/Ando/Salfa/Gespania).
+- `scriptUrl`: `https://script.google.com/macros/s/AKfycbxebFCdrIRxJVPzE3Rdo5hf_CZT9cpqIbszqQalGRTMa3v2aRedgwFTDfwkpWioXs9_/exec`
+  (desplegado 2026-07-30, corriendo `Code-PMS.gs`, verificado con `doGet` — responde
+  `{valorizacion:[],trazabilidad:[],objetivos:[],respel:[...]}`, vacío salvo `respel` que ya
+  trae la lista completa de residuos del Sheet clonado).
+- Sucursales: **sin definir aún** — la hoja `Contactos` del Sheet está vacía; se derivarán
+  automáticamente del Excel de trazabilidad que suba el usuario (mismo patrón que Euro/Ando/
+  Salfa/Gespania, no hardcodeadas en el JS).
+- `trazCols` igual que Ando (sin `Transportista (nombre)`, el Sheet clonado no trae esa
+  columna separada — coincide exactamente con el header real de `📊 Trazabilidad_Docs` del
+  Sheet de PMS).
+- `trazDocsCompletos: ['transp','disp']`, `trazDocsInfo: ['cert','factura','decl']` (patrón
+  estándar, igual que Copec/Abastible/Gespania/Salfa/Euro/Ando).
+- Objetivos: **decisión del usuario 2026-07-30** — se usan tal cual los 2 objetivos genéricos
+  que ya trae la pestaña `Objetivos 2026` del Sheet clonado ("100% trazabilidad" y "20%
+  Valorización"), sin objetivos específicos propios por ahora. Igual que Copec,
+  `EMPRESAS.pms.objetivos` solo tiene `{id:'trazabilidad', tipo:'trazabilidad'}` — el "20%
+  Valorización" no es una fila de objetivo separada, queda cubierto por las filas genéricas
+  % Real/Meta 2026/% Acumulado que ya se muestran en la tabla (mismo criterio usado con Euro
+  para "5% de valorización en volumen").
+- Metas de valorización: **meta fija de 20% hardcodeada** (`PMS_META_PCT` + `getPmsMetas()`,
+  agregado 2026-07-30) — a diferencia de Gespania/Salfa/Euro/Ando, el Sheet de PMS nunca tuvo
+  una fila "Meta %" precargada a mano, así que el patrón `metasFromSheets` (leer lo que ya
+  está en el Sheet) no tenía nada que leer y la meta nunca se sincronizaba. `getPmsMetas()`
+  genera dinámicamente `{sucursal: 20}` para todas las sucursales actuales (las de PMS no
+  están hardcodeadas de antemano), mismo patrón de "meta fija en código" que Abastible pero
+  calculado en runtime. Se usa en `autoSync()` (`metasActuales`) y en `renderCopecObjetivos()`
+  (`metas`).
+- `generaTotalResiduos` incluye a PMS (`esPms` en `processData()`) — el Sheet clonado ya trae
+  las pestañas `Total Residuos` (7 columnas, sin `Tons. CO2eq. evitadas` ni `Año` — igual que
+  Ando) y `RESPEL` (ya poblada con la lista estándar de residuos, igual que Ando). `Code-PMS.gs`
+  usa `numCols = 7` en `writeTotalResiduos`, mismo patrón que `Code-Ando.gs`.
+- **Bug de onboarding encontrado y corregido (2026-07-30)**: al agregar PMS solo se actualizó
+  la lista de empresas en `processData()` (`generaTotalResiduos`), pero quedaron 2 listas
+  hardcodeadas más sin `'pms'`: la de `metasActuales` y la de `filasTotalResiduos` dentro de
+  `autoSync()`, y la de `metas` en `renderCopecObjetivos()`. Resultado: "Total Residuos" nunca
+  se sincronizaba (el payload quedaba vacío, nunca se mandaba el POST) y la fila "Meta %"
+  tampoco. Corregido agregando `'pms'`/`empresaActual==='pms'` a las 3 listas restantes.
+- **Excepción de trazabilidad para operaciones de 0 kg (agregada 2026-07-30, solo PMS)**: en
+  todas las demás empresas, una operación con `Control de Peso (Kg) === 0` se descarta por
+  completo para efectos de trazabilidad (`if (kg === 0) return;` en `processData()`, no
+  incrementa `Importaciones` ni cuenta documentos). Para PMS, a pedido del usuario, estas
+  operaciones **sí** cuentan como aporte a la trazabilidad (incrementan `Importaciones`), pero
+  sin exigir transportista ni disposición final — se implementó igual que la excepción de
+  Donaciones ya existente (`donEnG`): cada grupo `trazMap[key]` ahora trackea `impCeroKg`
+  (cuántas de sus operaciones fueron de 0 kg), y en `calcObjetivos()` (cálculo de "100%
+  trazabilidad") ese conteo se suma al lado del documento exigido en la comparación
+  `(r[d]+donEnG+impCeroKg) >= r.imp` para `transp`/`disp` — mismo mecanismo de "sumar al
+  numerador" en vez de excluir la fila entera, para no afectar operaciones no-cero del mismo
+  residuo/mes/sucursal que sí deben cumplir. Como `emp.trazDocsCompletos` de PMS es
+  exactamente `['transp','disp']`, esta excepción cubre el 100% de los documentos exigidos
+  para PMS. Gateado con `empresaActual==='pms'` en `calcObjetivos()`, sin efecto en las demás
+  empresas (su `impCeroKg` queda siempre en 0).
+- **"Producto Circular" agregado a `VALORIZADOS_LIST` (2026-07-30, cambio global, no exclusivo
+  de PMS)**: Humus (Vivero Leliantú) aparecía como "No Valorizado" en `Total Residuos` porque
+  su `Tipo de Tratamiento` en el Excel de PMS es literalmente "Producto Circular", un valor
+  que no estaba en la lista de tratamientos que cuentan como valorización (`isValorizado()`).
+  Se agregó tal cual (comparación exacta tras normalizar tildes/mayúsculas, igual que el resto
+  de la lista). Como `VALORIZADOS_LIST` no está segmentada por empresa, si otra empresa usa
+  esa misma etiqueta también contará como valorizado — consistente con el propósito de la
+  lista (no se acotó a PMS a propósito).
+- **"Recuperación energética" agregado a `VALORIZADOS_LIST` (2026-07-30, cambio global)**:
+  detectado al investigar por qué NPR - Embotelladora Renca (CCU) caía a 65,1%/49,7% de
+  valorización en marzo/junio — el residuo "Ril de azúcar liquida" (77.290 kg en marzo,
+  178.270 kg en junio, volúmenes grandes que dominan el total mensual por ser ponderado por
+  kg) tenía `Tipo de Tratamiento = "Recuperación energética"`, no cubierto por la lista.
+  Confirmado por el usuario como un tratamiento valorizable. Se agregó (junto a su variante
+  sin tilde, aunque `isValorizado()` ya normaliza tildes/mayúsculas antes de comparar, mismo
+  patrón redundante que ya existía para "Reutilizacion"/"Reutilización").
+
+### CCU (agregada 2026-07-30)
+- Sheet ID: `1gChzhAy3wiXWAPr17OW4RypGMqY76dYRHLuK2wwvKR8` (título "CCU" en Drive, creado
+  2026-07-30 — clon vacío de la plantilla "Portal de Trazabilidad", igual punto de partida
+  que PMS/Euro/Ando/Salfa/Gespania). La pestaña `Objetivos 2026` de este Sheet en particular
+  no traía el texto genérico de plantilla — tenía pegado por error un borrador de correo sin
+  relación, así que no se usó como referencia (a diferencia de PMS, donde sí se reutilizó el
+  texto genérico).
+- `scriptUrl`: `https://script.google.com/macros/s/AKfycbxZIqb5W8o0GWZqWIrG5s1Qg0R54Ij15U7MiT-GzgUmXjaYSCx10nTVu-h5W6mLDvj6/exec`
+  (desplegado 2026-07-30, corriendo `Code-CCU.gs`, verificado con `doGet` — responde
+  `{valorizacion:[],trazabilidad:[],objetivos:[],respel:[...]}`, vacío salvo `respel`).
+- Sucursales: **2 con meta confirmada por el usuario 2026-07-30, texto exacto tal como viene
+  en el Excel** — "NPR - Embotelladora Renca" y "CirCCUlar". A diferencia de PMS/Euro/Ando
+  (donde las sucursales se derivan del Excel sin hardcodear), aquí sí se hardcodeó la meta por
+  sucursal (ver `CCU_METAS` abajo) porque el usuario ya conocía de antemano el nombre exacto y
+  la meta. **El Excel real subido trajo una 3ra sucursal, "NPR - Obra Nave 2 Planta Renca"**,
+  sin meta definida — no está en `CCU_METAS`, así que por diseño (`metasActuales[suc] !==
+  undefined`) simplemente no se le sincroniza fila "Meta %" ni se le muestra meta en Objetivos;
+  el resto (trazabilidad, % Real/Acumulado) funciona igual para ella. Pendiente confirmar con
+  el usuario si necesita meta propia.
+- **"NPR - Obra Nave 2 Planta Renca" agregada a `SUCURSALES_EXCLUIDAS` (2026-07-30)**: el
+  usuario confirmó que esa sucursal está cerrada — debe verse en Trazabilidad (histórico) pero
+  no en Valorización ni Objetivos, mismo criterio que "Edificio Eliodoro Yañez" de Socovesa.
+  Al revisar el mecanismo existente se encontró que estaba **incompleto**: `isSucExcluida()`
+  solo se usaba para poblar el selector `f-obj-suc` (Objetivos) — no filtraba nada cuando se
+  elegía "Todas", ni tocaba en absoluto la pestaña Valorización (selector `f-suc`, gráfico, ni
+  el % global agregado). Es decir, para Socovesa la sucursal excluida seguía siendo
+  visible en Valorización y en Objetivos con "Todas" seleccionado — documentado antes como
+  "no aparece en valorización/objetivos" pero en realidad solo estaba oculta del dropdown de
+  selección individual de Objetivos. Corregido para las 6 empresas de una vez: `renderVal()`
+  (lista a mostrar + agregado global de kg/% + contador "Sucursales"), `renderChart()`, y
+  `renderCopecObjetivos()` (rama `fS==='all'`) ahora filtran con `isSucExcluida()`; los
+  `populateSel('f-suc', ...)` (2 call sites, `processData()`/`loadSheetsData()`) también.
+  `f-traz-suc`/trazabilidad se dejó sin tocar a propósito (debe seguir mostrando todo,
+  incluidas sucursales cerradas).
+- `trazCols` igual que PMS/Ando (sin `Transportista (nombre)`, coincide con el header real del
+  Sheet clonado).
+- `trazDocsCompletos: ['transp','disp']`, `trazDocsInfo: ['cert','factura','decl']` (patrón
+  estándar).
+- Objetivos: **caso nuevo — mismos 3 objetivos para ambas sucursales, pero con meta de
+  valorización distinta por sucursal** (no objetivos *distintos* por sucursal; la app no
+  soporta eso hoy, solo listas de objetivos uniformes por empresa):
+  1. `100% trazabilidad` — tipo `trazabilidad`, estándar.
+  2. `Tener KPI Costo - Ingreso` — tipo `kpi_costo`, mismo cálculo que Abastible/Salfa/Ando (OK
+     si `Total Costo Neto de Transporte > 0` **O** `Precio por Venta de Residuo > 0`).
+  3. `Gestionar Residuos Spot` — **tipo `manual`** (decisión del usuario 2026-07-30: no hay un
+     dato identificable en el Excel para calcularlo automáticamente, se ingresa a mano el "%
+     cumplimiento" en la hoja `🎯 Objetivos` del Sheet, igual patrón que FGR/CO2/otros
+     objetivos manuales de Euro/Gespania/Ando).
+- Metas de valorización: **`CCU_METAS` hardcodeado** (nueva constante, junto a
+  `ABASTIBLE_METAS`/`COPEC_METAS_DEFAULT`) — `{'NPR - Embotelladora Renca': 96, 'CirCCUlar':
+  60}`. Usado directamente (no vía `metasFromSheets` ni una función dinámica como
+  `getPmsMetas()`) porque, a diferencia de PMS, las sucursales y sus metas ya se conocían de
+  antemano.
+- `generaTotalResiduos` incluye a CCU (`esCcu` en `processData()`) — mismo patrón que
+  Ando/PMS: el Sheet clonado ya trae las pestañas `Total Residuos` (7 columnas, sin `Tons.
+  CO2eq. evitadas` ni `Año`) y `RESPEL`. `Code-CCU.gs` usa `numCols = 7` en
+  `writeTotalResiduos`.
+- **Lección aplicada de PMS**: se agregó `'ccu'`/`empresaActual==='ccu'` a las 3 listas
+  hardcodeadas de empresas en un solo paso (`generaTotalResiduos` en `processData()`,
+  `metasActuales`+`filasTotalResiduos` en `autoSync()`, y `metas` en
+  `renderCopecObjetivos()`) para no repetir el bug de "Total Residuos nunca sincroniza" que
+  pasó al agregar PMS (ver sección de bugs arriba).
+
 ## Apps Script (estructura común a las 3 empresas originales; Gespania, Salfa, Euro y Ando siguen el mismo esquema)
 Cada empresa tiene su propio Google Sheet con 3 hojas, headers en fila 5, datos desde fila 6:
 - `♻️ Valorización` — columnas: `empresa_id | Sucursal | Tipo | Enero...Diciembre` (Tipo = "% Real" o "Meta %")
@@ -469,7 +605,10 @@ en vez de un encabezado con un mes-año distinto por columna:
   de trazabilidad) también usa `row['Año'] || new Date().getFullYear()` ahora, mismo patrón
   general que Valorización/Objetivos.
 
-## Pendientes conocidos
+- [ ] **PMS**: cargar el Excel de trazabilidad real para derivar sucursales; llenar manualmente
+      la pestaña `Contactos` del Sheet si se quiere (no la usa el visor, solo referencia).
+- [ ] **PMS**: probar carga de Excel end-to-end ahora que el Apps Script ya está desplegado y
+      verificado con `doGet` — es la primera vez que se prueba con datos reales.
 - [ ] **Euro**: arreglar el encabezado de `♻️ Valorización` en el Sheet real — hoy tiene ~34
       columnas de fecha mal generadas (ver sección "Año en Valorización y Objetivos de Euro").
       Formatear como texto sin formato, dejar solo `Enero`..`Diciembre` (12 columnas), e insertar
@@ -523,6 +662,13 @@ en vez de un encabezado con un mes-año distinto por columna:
 - [ ] Euro: si el usuario quiere, limpiar las hojas `Seguimiento_CSE` y `Config.Flat` del
       Sheet, que traen datos de otras empresas (ANDO, Copec, Daikin) por venir de una
       plantilla clonada — no bloquea nada, el visor no las usa
+- [ ] **CCU**: cargar el Excel de trazabilidad real y confirmar que los nombres de sucursal
+      calzan exactamente con `CCU_METAS` ("NPR - Embotelladora Renca", "CirCCUlar") — si el
+      Excel trae una variante de escritura, la meta no se va a mostrar para esa sucursal.
+- [ ] **CCU**: llenar a mano el "% cumplimiento" de "Gestionar Residuos Spot" en la hoja
+      `🎯 Objetivos` del Sheet (tipo `manual`, no se calcula desde el Excel).
+- [ ] **CCU**: revisar/limpiar la pestaña "Objetivos 2026" del Sheet, que quedó con un borrador
+      de correo pegado por error (no lo usa el visor, es solo cosmético).
 
 ## Cómo verificar sintaxis JS del archivo
 El HTML es un solo archivo con `<script>...</script>` embebido. Para validar sintaxis:
