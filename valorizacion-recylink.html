@@ -365,6 +365,25 @@ var EMPRESAS = {
       {id:'kpi_costo',       nombre:'Tener KPI Costo - Ingreso',   tipo:'kpi_costo'},
       {id:'residuos_spot',   nombre:'Gestionar Residuos Spot',     tipo:'manual'}
     ]
+  },
+  acciona: {
+    nombre: 'Acciona',
+    scriptUrl: 'https://script.google.com/macros/s/AKfycbz8gVOfQIf77WRLMbhdJ8ZkcI3LbIPzenh91k42npKetDOXax8Dx54V4UZm98KahiiV/exec',
+    prefix: 'acciona',
+    trazCols: [
+      {header:'Sucursal',key:'suc'},{header:'Mes',key:'mes'},{header:'Residuo',key:'residuo'},
+      {header:'Cod. LER',key:'ler'},{header:'Imp.',key:'imp'},{header:'Cert. trat.',key:'cert'},
+      {header:'Factura',key:'factura'},{header:'Cert. decl.',key:'decl'},
+      {header:'Transportista',key:'transp'},{header:'Disp. final',key:'disp'}
+    ],
+    trazDocsCompletos: ['transp','disp'],
+    trazDocsInfo: ['cert','factura','decl'],
+    objetivos: [
+      {id:'trazabilidad',    nombre:'100% trazabilidad', tipo:'trazabilidad'},
+      {id:'segregacion',     nombre:'Segregación de residuos (Madera, pallet, vidrio, fierro, PET, RESPEL, plumavit, PVC, Film Stretch)',
+        residuos:['Madera','Pallet','Vidrio','Fierro','PET','RESPEL','Plumavit','PVC','Film Stretch'], tipo:'valorizar_especificos'},
+      {id:'ces',             nombre:'Apoyar en obtención de puntos para certificación CES en temas de innovación y economía circular', tipo:'manual'}
+    ]
   }
 };
 
@@ -462,6 +481,46 @@ function getCopecMetas() {
 }
 function saveCopecMetas(metas) {
   localStorage.setItem('copec_metas', JSON.stringify(metas));
+}
+
+// Acciona: metas editables por sucursal desde la app, mismo patron que Copec
+// (boton "Editar metas" + localStorage + sync tipo valorizacion_metas), a
+// diferencia de PMS/CCU que usan una meta fija/hardcodeada sin editor. Default
+// de 40% para todas las sucursales (el objetivo "Superar el 40% de
+// valorizacion..." de Objetivos 2026), generado dinamicamente sobre la lista
+// de sucursales actual porque no se conocian de antemano (igual patron que
+// getPmsMetas()) — a diferencia de COPEC_METAS_DEFAULT (valores fijos por
+// sucursal conocida), este default es solo el punto de partida: editar una
+// sucursal desde "Editar metas" la guarda en localStorage y prevalece sobre
+// el 40% default para esa sucursal.
+var ACCIONA_META_PCT_DEFAULT = 40;
+function getAccionaMetasDefault() {
+  var metas = {};
+  sucursales.forEach(function(s){ metas[s] = ACCIONA_META_PCT_DEFAULT; });
+  return metas;
+}
+function getAccionaMetas() {
+  var stored = null;
+  try {
+    var saved = localStorage.getItem('acciona_metas');
+    stored = saved ? JSON.parse(saved) : null;
+  } catch(e) { stored = null; }
+  return Object.assign({}, getAccionaMetasDefault(), metasFromSheets, stored || {});
+}
+function saveAccionaMetas(metas) {
+  localStorage.setItem('acciona_metas', JSON.stringify(metas));
+}
+// Devuelve las metas editables (get/save/default) de la empresa activa entre
+// las que soportan edicion desde la app — hoy Copec y Acciona.
+function getMetasEditablesActuales() {
+  return empresaActual === 'acciona' ? getAccionaMetas() : getCopecMetas();
+}
+function saveMetasEditablesActuales(metas) {
+  if (empresaActual === 'acciona') saveAccionaMetas(metas); else saveCopecMetas(metas);
+}
+function metaDefaultEditable(suc) {
+  if (empresaActual === 'acciona') return ACCIONA_META_PCT_DEFAULT;
+  return COPEC_METAS_DEFAULT[suc] || '';
 }
 
 // Normalización de nombres de sucursal
@@ -597,7 +656,7 @@ function resetData() {
   var hasObj = (emp && emp.objetivos!==null) || empresaActual==='copec' || empresaActual==='abastible';
   document.getElementById('obj-empty').style.display = hasObj ? 'none' : '';
   document.getElementById('obj-content').style.display = hasObj ? 'block' : 'none';
-  document.getElementById('btn-editar-metas').style.display = empresaActual==='copec' ? 'inline-flex' : 'none';
+  document.getElementById('btn-editar-metas').style.display = (empresaActual==='copec'||empresaActual==='acciona') ? 'inline-flex' : 'none';
   document.getElementById('btn-gestionar-sucursales').style.display = 'none';
   document.getElementById('sucursales-form').style.display = 'none';
   document.getElementById('obj-grid').innerHTML = '';
@@ -638,7 +697,8 @@ function processData(rows, fname) {
   var esAndo = empresaActual === 'ando';
   var esPms = empresaActual === 'pms';
   var esCcu = empresaActual === 'ccu';
-  var generaTotalResiduos = esCopec || esAbastible || esGespania || esSalfa || esEuro || esAndo || esPms || esCcu;
+  var esAcciona = empresaActual === 'acciona';
+  var generaTotalResiduos = esCopec || esAbastible || esGespania || esSalfa || esEuro || esAndo || esPms || esCcu || esAcciona;
 
   rows.forEach(function(r) {
     var suc = r['Sucursal']||'';
@@ -670,7 +730,12 @@ function processData(rows, fname) {
     // Abastible SI genera Total Residuos pero mantiene el % de valorizacion sin excluir Respel.
     // Excavacion se excluye del % de valorizacion en todos los casos (todas las empresas).
     var esExcavacion = normResiduo(residuo) === 'excavacion';
-    var excluirDeVal = (esCopec && respel) || esExcavacion;
+    // Acciona: su objetivo "Superar el 40% de valorizacion" excluye ademas
+    // Escombro y Arena (decision del usuario 2026-07-31, solo para Acciona,
+    // igual criterio que la exclusion de Respel que es solo para Copec) — NO
+    // se excluyen de trazabilidad, solo del % de valorizacion.
+    var esEscombroArena = esAcciona && (normResiduo(residuo) === 'escombro' || normResiduo(residuo) === 'arena');
+    var excluirDeVal = (esCopec && respel) || esExcavacion || esEscombroArena;
     // Euro mide % de valorizacion por volumen (m3) en vez de peso (kg), unica excepcion.
     var metricaVal = esEuro ? m3 : kg;
     if (!excluirDeVal) {
@@ -742,7 +807,7 @@ function processData(rows, fname) {
   var hasObj = emp.objetivos!==null || empresaActual==='copec' || empresaActual==='abastible';
   document.getElementById('obj-empty').style.display=hasObj?'none':'';
   document.getElementById('obj-content').style.display=hasObj?'block':'none';
-  document.getElementById('btn-editar-metas').style.display=empresaActual==='copec'?'inline-flex':'none';
+  document.getElementById('btn-editar-metas').style.display=(empresaActual==='copec'||empresaActual==='acciona')?'inline-flex':'none';
   document.getElementById('btn-gestionar-sucursales').style.display=sucursales.length>0?'inline-flex':'none';
 
   document.getElementById('sync-dot').className='dot syncing';
@@ -761,7 +826,7 @@ function autoSync(rows) {
   var emp = EMPRESAS[empresaActual];
 
   // Preparar payload valorización
-  var metasActuales = empresaActual === 'copec' ? getCopecMetas() : empresaActual === 'abastible' ? ABASTIBLE_METAS : empresaActual === 'pms' ? getPmsMetas() : empresaActual === 'ccu' ? CCU_METAS : (empresaActual === 'gespania' || empresaActual === 'salfa' || empresaActual === 'euro' || empresaActual === 'ando') ? metasFromSheets : {};
+  var metasActuales = empresaActual === 'copec' ? getCopecMetas() : empresaActual === 'acciona' ? getAccionaMetas() : empresaActual === 'abastible' ? ABASTIBLE_METAS : empresaActual === 'pms' ? getPmsMetas() : empresaActual === 'ccu' ? CCU_METAS : (empresaActual === 'gespania' || empresaActual === 'salfa' || empresaActual === 'euro' || empresaActual === 'ando') ? metasFromSheets : {};
   var filasVal = [];
   // Euro: fila por Tipo POR AÑO (columna Año agregada a mano en la hoja, con
   // meses fijos Ene-Dic) en vez de un encabezado con un mes-año por columna —
@@ -806,7 +871,7 @@ function autoSync(rows) {
   // Año (col. B) y Tons. CO2eq. evitadas son exclusivos de Euro y del grupo original
   // (Copec/Abastible/Gespania/Salfa/Euro) respectivamente — Ando no usa ninguna de las 2.
   var filasTotalResiduos = [];
-  if (empresaActual === 'copec' || empresaActual === 'abastible' || empresaActual === 'gespania' || empresaActual === 'salfa' || empresaActual === 'euro' || empresaActual === 'ando' || empresaActual === 'pms' || empresaActual === 'ccu') {
+  if (empresaActual === 'copec' || empresaActual === 'abastible' || empresaActual === 'gespania' || empresaActual === 'salfa' || empresaActual === 'euro' || empresaActual === 'ando' || empresaActual === 'pms' || empresaActual === 'ccu' || empresaActual === 'acciona') {
     var generaAnioTR = empresaActual === 'euro';
     var generaCO2TR = empresaActual === 'copec' || empresaActual === 'abastible' || empresaActual === 'gespania' || empresaActual === 'salfa' || empresaActual === 'euro';
     filasTotalResiduos = totalResiduosRows.map(function(r){
@@ -952,7 +1017,7 @@ function renderVal() {
   var thBase='background:var(--surface2);padding:8px 12px;font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--border);white-space:nowrap;';
   var thFirst=thBase+'text-align:left;min-width:180px;';
   var thCol=thBase+'text-align:center;border-left:1px solid var(--border);';
-  var valMetas = empresaActual === 'copec' ? getCopecMetas() : empresaActual === 'abastible' ? ABASTIBLE_METAS : {};
+  var valMetas = empresaActual === 'copec' ? getCopecMetas() : empresaActual === 'acciona' ? getAccionaMetas() : empresaActual === 'abastible' ? ABASTIBLE_METAS : {};
 
   sucsToShow.forEach(function(suc) {
     if (!valMatrix[suc]) return; // Sucursal solo en trazabilidad, no en valorización
@@ -1022,9 +1087,9 @@ function renderVal() {
     });
     trAcum.innerHTML=acumCells; tbody.appendChild(trAcum);
 
-    // Fila Meta (solo Copec)
-    if (empresaActual === 'copec') {
-      var metas = getCopecMetas();
+    // Fila Meta (Copec y Acciona, unicas 2 empresas con metas editables desde la app)
+    if (empresaActual === 'copec' || empresaActual === 'acciona') {
+      var metas = getMetasEditablesActuales();
       var meta = metas[suc] !== undefined ? metas[suc] : null;
       if (meta !== null) {
         var trMetaV=document.createElement('tr');
@@ -1197,13 +1262,18 @@ function calcObjetivos(anio) {
           // Excepciones: orgánicos y CDL no requieren transportista ni disposición final
           var esCDL = suc.toLowerCase().indexOf('cdl') === 0;
           var docsExcEspecial = {transp:1, disp:1}; // docs que se excluyen para orgánicos y CDL
+          // Acciona: Madera no exige disposición final, pero sí transportista
+          // (decisión del usuario 2026-07-31, exclusiva de Acciona).
+          var docsExcSoloDisp = {disp:1};
           var completas=0;
           trazSM.forEach(function(r){
             var esOrganico = (r.residuo+'').toLowerCase().indexOf('orgán') >= 0 || (r.residuo+'').toLowerCase().indexOf('organico') >= 0;
             var excluirTranspDisp = esCDL || esOrganico;
+            var excluirSoloDisp = empresaActual==='acciona' && normResiduo(r.residuo)==='madera';
             var donEnG=rowsFin.filter(function(rr){return rr['Sucursal']===r.suc&&toYM(rr['Fecha de Operacion']||rr['Fecha de Operación']||rr['Fecha de operación']||'')===r.mes&&rr['Residuo']===r.residuo&&rr['Tipo de Tratamiento']==='Donaciones';}).length;
             var allOk=docs.every(function(d){
               if(excluirTranspDisp && docsExcEspecial[d]) return true;
+              if(excluirSoloDisp && docsExcSoloDisp[d]) return true;
               if(docsExcDon[d])return (r[d]+donEnG+(empresaActual==='pms'?(r.impCeroKg||0):0))>=r.imp;
               return r[d]>=r.imp;
             });
@@ -1217,9 +1287,11 @@ function calcObjetivos(anio) {
             trazSM.forEach(function(r){
               var esOrganico = (r.residuo+'').toLowerCase().indexOf('orgán') >= 0 || (r.residuo+'').toLowerCase().indexOf('organico') >= 0;
               var excluirTranspDisp = esCDL || esOrganico;
+              var excluirSoloDisp = empresaActual==='acciona' && normResiduo(r.residuo)==='madera';
               var donEnG=rowsFin.filter(function(rr){return rr['Sucursal']===r.suc&&toYM(rr['Fecha de Operacion']||rr['Fecha de Operación']||rr['Fecha de operación']||'')===r.mes&&rr['Residuo']===r.residuo&&rr['Tipo de Tratamiento']==='Donaciones';}).length;
               var resOk=docs.every(function(d){
                 if(excluirTranspDisp && docsExcEspecial[d]) return true;
+                if(excluirSoloDisp && docsExcSoloDisp[d]) return true;
                 if(docsExcDon[d])return (r[d]+donEnG+(empresaActual==='pms'?(r.impCeroKg||0):0))>=r.imp;
                 return r[d]>=r.imp;
               });
@@ -1228,6 +1300,7 @@ function calcObjetivos(anio) {
               } else {
                 docs.forEach(function(d){
                   if(excluirTranspDisp && docsExcEspecial[d]) return;
+                  if(excluirSoloDisp && docsExcSoloDisp[d]) return;
                   var falt=docsExcDon[d]?Math.max(0,r.imp-(r[d]+donEnG+(empresaActual==='pms'?(r.impCeroKg||0):0))):Math.max(0,r.imp-(r[d]||0));
                   if(falt>0){
                     var k=r.residuo||'Sin nombre';
@@ -1639,7 +1712,7 @@ function loadSheetsData(data) {
   document.getElementById('obj-empty').style.display = hasObj ? 'none' : '';
   document.getElementById('obj-content').style.display = hasObj || empresaActual === 'copec' || empresaActual === 'abastible' ? 'block' : 'none';
   document.getElementById('obj-empty').style.display = (hasObj || empresaActual === 'copec' || empresaActual === 'abastible') ? 'none' : '';
-  document.getElementById('btn-editar-metas').style.display = empresaActual === 'copec' ? 'inline-flex' : 'none'; // Abastible no tiene metas editables
+  document.getElementById('btn-editar-metas').style.display = (empresaActual === 'copec'||empresaActual==='acciona') ? 'inline-flex' : 'none'; // Abastible no tiene metas editables
   document.getElementById('btn-gestionar-sucursales').style.display = sucursales.length > 0 ? 'inline-flex' : 'none';
 
 
@@ -1782,7 +1855,7 @@ function renderCopecObjetivos() {
   var grid = document.getElementById('obj-grid');
   grid.innerHTML = '';
   var emp = EMPRESAS[empresaActual];
-  var metas = empresaActual === 'copec' ? getCopecMetas() : (empresaActual === 'abastible' ? ABASTIBLE_METAS : (empresaActual === 'pms' ? getPmsMetas() : (empresaActual === 'ccu' ? CCU_METAS : ((empresaActual === 'gespania' || empresaActual === 'salfa' || empresaActual === 'euro' || empresaActual === 'ando') ? metasFromSheets : {}))));
+  var metas = empresaActual === 'copec' ? getCopecMetas() : (empresaActual === 'acciona' ? getAccionaMetas() : (empresaActual === 'abastible' ? ABASTIBLE_METAS : (empresaActual === 'pms' ? getPmsMetas() : (empresaActual === 'ccu' ? CCU_METAS : ((empresaActual === 'gespania' || empresaActual === 'salfa' || empresaActual === 'euro' || empresaActual === 'ando') ? metasFromSheets : {})))));
   var sucsToShow = fS === 'all' ? sucursales.filter(function(s){ return !isSucExcluida(s); }) : [fS];
   var mesesAnio = mesesDisp.filter(function(m){ return m.slice(0,4)===fA; });
   var mesesToShow = fM === 'all' ? mesesAnio : [fM];
@@ -2088,11 +2161,11 @@ document.getElementById('btn-guardar-sucursales').addEventListener('click', func
 });
 
 function openMetasEditor() {
-  var metas = getCopecMetas();
+  var metas = getMetasEditablesActuales();
   var grid = document.getElementById('metas-grid');
   grid.innerHTML = '';
   sucursales.forEach(function(suc) {
-    var val = metas[suc] !== undefined ? metas[suc] : (COPEC_METAS_DEFAULT[suc] || '');
+    var val = metas[suc] !== undefined ? metas[suc] : metaDefaultEditable(suc);
     var div = document.createElement('div');
     div.style.cssText = 'display:flex;align-items:center;gap:8px';
     div.innerHTML = '<label style="font-size:12px;color:var(--text-sec);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+suc+'">'+suc+'</label>'
@@ -2107,13 +2180,13 @@ document.getElementById('btn-cancelar-metas').addEventListener('click', function
   document.getElementById('metas-form').style.display = 'none';
 });
 document.getElementById('btn-guardar-metas').addEventListener('click', function() {
-  var metas = getCopecMetas();
+  var metas = getMetasEditablesActuales();
   document.querySelectorAll('#metas-grid input[data-suc]').forEach(function(inp) {
     var suc = inp.getAttribute('data-suc');
     var val = parseFloat(inp.value);
     if (!isNaN(val)) metas[suc] = val;
   });
-  saveCopecMetas(metas);
+  saveMetasEditablesActuales(metas);
   document.getElementById('metas-form').style.display = 'none';
   // Sincronizar metas al Sheet
   syncMetas(metas);

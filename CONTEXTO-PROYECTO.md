@@ -343,6 +343,98 @@ permite hacer seguimiento de valorización de residuos y trazabilidad documental
   `renderCopecObjetivos()`) para no repetir el bug de "Total Residuos nunca sincroniza" que
   pasó al agregar PMS (ver sección de bugs arriba).
 
+### Acciona (agregada 2026-07-31)
+- Sheet ID: `1t89jBSO8bQ7XXhh-CYQ2bs9cC-Ph-WVv9kbCCvEBqAk` (título "Acciona" en Drive, creado
+  2026-07-31 — clon vacío de la plantilla "Portal de Trazabilidad", igual punto de partida
+  que PMS/CCU/Euro/Ando/Salfa/Gespania).
+- `scriptUrl`: `https://script.google.com/macros/s/AKfycbz8gVOfQIf77WRLMbhdJ8ZkcI3LbIPzenh91k42npKetDOXax8Dx54V4UZm98KahiiV/exec`
+  (desplegado 2026-07-31, corriendo `Code-Acciona.gs`, aún no verificado con `doGet` real —
+  ver pendiente abajo).
+- Sucursales: **sin definir aún** — la hoja `Contactos` del Sheet está vacía; se derivarán
+  automáticamente del Excel de trazabilidad que suba el usuario (mismo patrón que
+  Euro/Ando/Salfa/Gespania/PMS/CCU, no hardcodeadas en el JS).
+- `trazCols` igual que Ando/PMS/CCU (sin `Transportista (nombre)`, coincide con el header
+  real de `📊 Trazabilidad_Docs` del Sheet clonado). Ese header además trae una columna extra
+  al final, `Comentario por sucursal`, que no está en `trazCols` — mismo quirk exacto que
+  Ando (`writeTrazabilidad` borra y reinserta la fila completa en cada sync, así que un
+  comentario manual en esa columna se pierde al sincronizar; no se resolvió, mismo criterio
+  que Ando).
+- `trazDocsCompletos: ['transp','disp']`, `trazDocsInfo: ['cert','factura','decl']` (patrón
+  estándar).
+- La pestaña `Objetivos 2026` del Sheet clonado ya traía 4 objetivos con texto específico de
+  Acciona (no el genérico de plantilla) al momento de crear la empresa — se usaron tal cual:
+  1. `100% trazabilidad` — tipo `trazabilidad`, estándar.
+  2. `Superar el 40% de valorización de residuos (sin considerar escombro, arena y
+     excavación)` — **no** se agregó como fila de objetivo propia en `EMPRESAS.acciona.objetivos`
+     (decisión del usuario 2026-07-31, mismo criterio usado con Euro/PMS: ya queda cubierto
+     por las filas genéricas % Real/% Acumulado/Meta 2026 que muestra la tabla de Objetivos
+     para cualquier empresa). Lo que sí cambió es el cálculo del propio %: en `processData()`
+     se agregó `esEscombroArena = esAcciona && (residuo==='escombro'||residuo==='arena')`
+     (comparación normalizada sin tildes vía `normResiduo()`), sumado a `excluirDeVal` junto
+     a la exclusión de Excavación ya existente para todas las empresas. **Solo para Acciona**
+     (decisión del usuario 2026-07-31, igual patrón que la exclusión de Respel que es
+     exclusiva de Copec) — Escombro/Arena siguen contando normalmente para las demás 8
+     empresas. Esta exclusión es solo del %valorización, no de trazabilidad (Escombro/Arena
+     sí exigen sus documentos normales, a diferencia de Excavación que también se excluye de
+     trazabilidad).
+  3. `Segregación de residuos (Madera, pallet, vidrio, fierro, PET, RESPEL, plumavit, PVC,
+     Film Stretch)` — reutiliza el tipo `valorizar_especificos` que ya existía para Euro
+     ("Valorizar fierro, madera, cartón"), sin cambios de código: es genérico para cualquier
+     lista de N residuos (`obj.residuos`), calcula % anual = (residuos de la lista valorizados
+     al menos una vez en el año) / N. Config: `residuos:['Madera','Pallet','Vidrio','Fierro',
+     'PET','RESPEL','Plumavit','PVC','Film Stretch']` (9 ítems, decisión del usuario
+     2026-07-31 sobre cómo calcular este objetivo automáticamente — comparación normalizada
+     sin tildes, igual que Euro).
+  4. `Apoyar en obtención de puntos para certificación CES en temas de innovación y economía
+     circular` — tipo `manual` (confirmado por el usuario 2026-07-31): no hay dato en el
+     Excel de trazabilidad que permita calcularlo, se ingresa a mano el "% cumplimiento" en
+     la hoja `🎯 Objetivos` del Sheet, mismo patrón que FGR/CO2/otros objetivos manuales de
+     Euro/Gespania/Ando/CCU.
+- Metas de valorización: **editables por sucursal desde la app** (decisión del usuario
+  2026-07-31), mismo patrón que Copec — `getAccionaMetas()`/`saveAccionaMetas()`
+  (localStorage key `acciona_metas`) calcadas de `getCopecMetas()`/`saveCopecMetas()`. Se
+  agregó un pequeño dispatcher (`getMetasEditablesActuales()`/`saveMetasEditablesActuales()`/
+  `metaDefaultEditable()`) para que `openMetasEditor()` y su handler de guardado (antes
+  hardcodeados a Copec) sirvan a cualquiera de las 2 empresas con metas editables sin
+  duplicar esas ~30 líneas. El botón "✎ Editar metas" y la fila "Meta 2026" en la tabla
+  agrupada de Valorización ahora se muestran para `empresaActual==='copec'||'acciona'` en
+  vez de solo Copec (3 call sites de visibilidad del botón + 1 de la fila).
+  - **Bug encontrado y corregido (2026-07-31)**: al agregar Acciona, `ACCIONA_METAS_DEFAULT`
+    se dejó como objeto vacío `{}` (a diferencia de `COPEC_METAS_DEFAULT`, que ya trae valores
+    por sucursal conocida) porque las sucursales de Acciona no se conocían de antemano.
+    Resultado: tras subir el Excel real, la fila "Meta %" nunca se sincronizaba a la hoja
+    `♻️ Valorización` (el usuario reportó "falta la meta de valorización en el excel") — mismo
+    mecanismo de `autoSync()` que omite la fila si `metasActuales[suc]` es `undefined` (ver
+    bug #8 de la lista general), y como no había ningún default, siempre era `undefined` hasta
+    que alguien abriera "Editar metas" a mano. Corregido reemplazando la constante estática por
+    `getAccionaMetasDefault()` (función, mismo patrón que `getPmsMetas()`): genera
+    dinámicamente `{sucursal: 40}` para todas las `sucursales` actuales (`ACCIONA_META_PCT_DEFAULT
+    = 40`, tomado del objetivo "Superar el 40% de valorización..."). `getAccionaMetas()` ahora
+    mergea `getAccionaMetasDefault()` (en vez de la constante vacía) + `metasFromSheets` +
+    `localStorage`, así que el 40% se sincroniza automáticamente apenas se sube el Excel, sin
+    perder la posibilidad de editar el valor por sucursal desde la app (lo guardado en
+    localStorage sigue prevaleciendo sobre el default).
+- `generaTotalResiduos` incluye a Acciona (`esAcciona` en `processData()`) — el Sheet
+  clonado ya trae las pestañas `Total Residuos` (7 columnas, sin `Tons. CO2eq. evitadas` ni
+  `Año` — igual que Ando/PMS/CCU) y `RESPEL` (lista estándar). `Code-Acciona.gs` usa
+  `numCols = 7` en `writeTotalResiduos`, mismo patrón que `Code-Ando.gs`/`Code-PMS.gs`/
+  `Code-CCU.gs`.
+- **Lección aplicada de PMS/CCU**: se agregó `'acciona'`/`empresaActual==='acciona'` a las
+  3 listas hardcodeadas de empresas en un solo paso (`generaTotalResiduos` en
+  `processData()`, `metasActuales`+`filasTotalResiduos` en `autoSync()`, y `metas` en
+  `renderCopecObjetivos()`), más el `valMetas` de `renderVal()` (propio de las empresas con
+  metas editables), para no repetir el bug de "Total Residuos nunca sincroniza".
+- **Excepción de trazabilidad para Madera (agregada 2026-07-31, solo Acciona)**: a pedido
+  del usuario, la Madera no exige el documento "Disposición final" para contar como completa
+  en "100% trazabilidad" — pero sí sigue exigiendo Transportista (a diferencia de la
+  excepción de CDL/Orgánicos, que excluye ambos). Implementado en `calcObjetivos()`
+  (rama `obj.tipo==='trazabilidad'`) con una variable nueva `excluirSoloDisp =
+  empresaActual==='acciona' && normResiduo(r.residuo)==='madera'` y un set
+  `docsExcSoloDisp={disp:1}`, chequeados junto a (pero por separado de) la excepción
+  existente `excluirTranspDisp`/`docsExcEspecial` de CDL/Orgánicos, en los 3 lugares que
+  recorren `trazSM` (cálculo del %, detalle "✓ residuos completos", y detalle de
+  documentos faltantes).
+
 ## Apps Script (estructura común a las 3 empresas originales; Gespania, Salfa, Euro y Ando siguen el mismo esquema)
 Cada empresa tiene su propio Google Sheet con 3 hojas, headers en fila 5, datos desde fila 6:
 - `♻️ Valorización` — columnas: `empresa_id | Sucursal | Tipo | Enero...Diciembre` (Tipo = "% Real" o "Meta %")
@@ -669,6 +761,22 @@ en vez de un encabezado con un mes-año distinto por columna:
       `🎯 Objetivos` del Sheet (tipo `manual`, no se calcula desde el Excel).
 - [ ] **CCU**: revisar/limpiar la pestaña "Objetivos 2026" del Sheet, que quedó con un borrador
       de correo pegado por error (no lo usa el visor, es solo cosmético).
+- [x] **Acciona**: el despliegue del Apps Script quedó restringido al crearlo (`doGet`
+      devolvía `403 Acceso denegado`) — corregido 2026-07-31 cambiando "Quién tiene acceso" a
+      "Cualquier usuario" en Implementar > Gestionar implementaciones. Verificado con `curl`:
+      ahora responde `302` (redirect público normal) y el JSON esperado
+      `{valorizacion:[],trazabilidad:[],objetivos:[],respel:[...]}`.
+- [ ] **Acciona**: cargar el Excel de trazabilidad real para derivar las sucursales — la meta
+      de 40% ahora se sincroniza automáticamente para todas (ver `getAccionaMetasDefault()`
+      arriba); usar "✎ Editar metas" solo si alguna sucursal necesita un % distinto.
+- [ ] **Acciona**: llenar a mano el "% cumplimiento" de "Apoyar en obtención de puntos para
+      certificación CES..." en la hoja `🎯 Objetivos` del Sheet (tipo `manual`, no se calcula
+      desde el Excel).
+- [ ] **Acciona**: probar carga de Excel end-to-end una vez desplegado el Apps Script, y
+      confirmar que el objetivo de segregación (9 residuos: Madera/Pallet/Vidrio/Fierro/PET/
+      RESPEL/Plumavit/PVC/Film Stretch) y la exclusión de Escombro/Arena del %valorización
+      se vean razonables con datos reales — son cálculos nuevos, sin verificar contra el
+      Excel real de Acciona todavía.
 
 ## Cómo verificar sintaxis JS del archivo
 El HTML es un solo archivo con `<script>...</script>` embebido. Para validar sintaxis:
