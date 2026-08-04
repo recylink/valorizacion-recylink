@@ -741,6 +741,33 @@ en vez de un encabezado con un mes-año distinto por columna:
       (no solo local) que Baterías de plomo, Tubos Fluorescentes y Residuos contaminados con
       HC/pintura ya salgan excluidos de SINADER (antes del deploy solo se excluía el residuo
       literal "RESPEL" por el fallback en `isRespel()`).
+- [ ] **Visor-de-Objetivos-Abastible** (repo aparte `recylink/Visor-de-Objetivos-Abastible`,
+      GitHub Pages en `recylink.github.io/Visor-de-Objetivos-Abastible/`) — dashboard standalone
+      para Abastible, subido una sola vez el 2026-07-27 y nunca conectado de verdad a datos
+      reales. Root cause (2026-08-04): carga datos con JSONP (`<script src="...exec?callback=X">`,
+      `cargarDatos()` línea ~2218 de su `index.html`), pero el `doGet` de `Code-Abastible.gs`
+      ignoraba el parámetro `callback` y devolvía JSON crudo — el navegador lo interpreta como
+      un bloque `{ ... }` con errores de sintaxis (las claves son strings, no labels válidos),
+      dispara `scriptTag.onerror` → "No se pudo contactar la fuente de datos". Además, aunque
+      se resolviera el JSONP, el payload que esa página espera (`{EMPRESAS, VAL_DATA,
+      MESES_ACTIVOS}`, donde cada "EMPRESA" es en realidad una SUCURSAL) es un contrato
+      totalmente distinto al `{valorizacion, trazabilidad, objetivos, respel}` que devuelve
+      `doGet` para el visor multi-empresa.
+      **Arreglado en `Code-Abastible.gs`:** se agregó `buildLegacyPayload_()` (arma
+      `EMPRESAS`/`VAL_DATA`/`MESES_ACTIVOS` a partir de las mismas 3 hojas que ya lee `doGet`,
+      reutilizando el mismo parseo tolerante de `%` que usa `valorizacion-recylink.html` —
+      ver `parsePct_`) y `doGet` ahora detecta `e.parameter.callback`: si viene, responde
+      `callback({...})` con `MimeType.JAVASCRIPT` en vez de JSON plano (el comportamiento sin
+      `callback`, que usa el visor multi-empresa, no cambió). Contrato completo del payload
+      legacy (`EMPRESAS[i].mensual/anual/cse/objetivos`, `VAL_DATA[id].meses/acumulado/meta`)
+      documentado a mano leyendo `index.html` de ese repo — sin eso, campos como
+      `emp.anual`/`emp.cse.encuesta` faltantes hacen crashear el render (acceso sin optional
+      chaining). Probado localmente con datos mock en Node (parseo de "57.6%" vs `0.3` vs `1`,
+      y que un `0` legítimo en `docs` no se pierda — bug real que apareció y se corrigió con
+      `pickField_()` en vez de encadenar `a||b`, que descartaba un 0 real).
+      **Pendiente:** el usuario debe pegar el `Code-Abastible.gs` actualizado en el Apps Script
+      real de Abastible (mismo paso pendiente que el punto anterior) y luego falta verificar
+      en vivo que `recylink.github.io/Visor-de-Objetivos-Abastible/` cargue datos reales.
 - [x] Abastible (2026-08-04): a los residuos Respel no se les debe exigir declaración
       SINADER — se agregó la exclusión en `calcObjetivos()` (rama `obj.tipo==='sinader'`,
       `valorizacion-recylink.html`), reutilizando `isRespel()` igual que la exclusión ya

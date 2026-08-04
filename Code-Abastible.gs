@@ -200,6 +200,170 @@ function readRespelSheet_() {
   });
 }
 
+// ============================================================
+// NUEVO (2026-08-04): payload JSONP para el visor standalone
+// "Visor-de-Objetivos-Abastible" (repo aparte, GitHub Pages).
+// Ese visor no usa fetch() sino un <script src="...exec?callback=NOMBRE">
+// (JSONP) y espera un payload distinto al de doGet clásico:
+// {EMPRESAS, VAL_DATA, MESES_ACTIVOS}, donde cada "EMPRESA" es en
+// realidad una SUCURSAL de Abastible. Se arma aquí a partir de las
+// mismas 3 hojas que ya lee doGet (Valorización/Trazabilidad_Docs/
+// Objetivos), sin tocar el formato que consume el visor multi-empresa.
+// ============================================================
+
+var MESES_ES_LIST_ = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+
+// Mismo parseo tolerante que usa el visor multi-empresa (JS del HTML):
+// admite "57.6%" (string con %), 0.3 (fraccion) o 30 (ya en %).
+function parsePct_(val) {
+  var raw = (val + '').replace('%', '').replace(',', '.').trim();
+  var pct = parseFloat(raw);
+  if (isNaN(pct)) return null;
+  var hasPercent = (val + '').indexOf('%') >= 0;
+  if (!hasPercent && pct > 0 && pct < 1) pct = pct * 100;
+  else if (!hasPercent && pct === 1) pct = 100;
+  return pct;
+}
+
+function numOrNull_(v) {
+  if (v === '' || v === null || v === undefined) return null;
+  var n = parseInt(v, 10);
+  return isNaN(n) ? null : n;
+}
+
+// Elige el primer valor "presente" entre varios nombres de columna alternativos
+// (distintas empresas usan headers ligeramente distintos). A diferencia de
+// "a || b", esto NO descarta un 0 legitimo (0 documentos cargados = "Falta"),
+// solo avanza al siguiente candidato si el campo esta vacio/ausente.
+function pickField_(row, keys) {
+  for (var i = 0; i < keys.length; i++) {
+    var v = row[keys[i]];
+    if (v !== undefined && v !== null && v !== '') return v;
+  }
+  return null;
+}
+
+// Slug simple y estable para usar como id (clave de objeto, atributo onclick sin comillas).
+function slugify_(s) {
+  s = (s || '').toString().trim().toLowerCase();
+  s = s.replace(/[áàä]/g, 'a').replace(/[éèë]/g, 'e').replace(/[íìï]/g, 'i')
+       .replace(/[óòö]/g, 'o').replace(/[úùü]/g, 'u').replace(/ñ/g, 'n');
+  s = s.replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  return s || 'sucursal';
+}
+
+function iniciales_(s) {
+  var palabras = (s || '').trim().split(/\s+/).filter(function(w) { return w.length > 0; });
+  var letras = palabras.map(function(w) { return w.charAt(0).toUpperCase(); }).join('');
+  return letras.slice(0, 2) || '?';
+}
+
+function buildLegacyPayload_(valorizacionRows, trazabilidadRows, objetivosRows) {
+  var sucSet = {};
+  valorizacionRows.forEach(function(r) {
+    if ((r['Tipo'] || '') === '% Real') { var s = (r['Sucursal'] || '') + ''; if (s) sucSet[s] = 1; }
+  });
+  trazabilidadRows.forEach(function(r) { var s = (r['Sucursal'] || '') + ''; if (s) sucSet[s] = 1; });
+  var sucursales = Object.keys(sucSet).sort();
+
+  // Meses activos: Enero..(ultimo mes con algun '% Real' cargado en cualquier sucursal).
+  var lastIdx = -1;
+  valorizacionRows.forEach(function(r) {
+    if ((r['Tipo'] || '') !== '% Real') return;
+    MESES_ES_LIST_.forEach(function(mes, i) {
+      if (parsePct_(r[mes]) !== null && i > lastIdx) lastIdx = i;
+    });
+  });
+  var mesesActivos = lastIdx >= 0 ? MESES_ES_LIST_.slice(0, lastIdx + 1) : MESES_ES_LIST_.slice(0, 1);
+
+  var valMeses = {}, valMeta = {}, valAcum = {};
+  valorizacionRows.forEach(function(r) {
+    var suc = (r['Sucursal'] || '') + '';
+    if (!suc) return;
+    var tipo = (r['Tipo'] || '') + '';
+    var destino = tipo === '% Real' ? valMeses : tipo === 'Meta %' ? valMeta : tipo === '% Acumulado' ? valAcum : null;
+    if (!destino) return;
+    if (!destino[suc]) destino[suc] = {};
+    mesesActivos.forEach(function(mes) {
+      var pct = parsePct_(r[mes]);
+      if (pct !== null) destino[suc][mes] = pct;
+    });
+  });
+
+  // Trazabilidad agrupada por sucursal -> mes -> residuos[]
+  var mensualPorSuc = {};
+  trazabilidadRows.forEach(function(r) {
+    var suc = (r['Sucursal'] || '') + '';
+    var mes = (r['Mes'] || '') + '';
+    if (!suc || mesesActivos.indexOf(mes) < 0) return;
+    if (!mensualPorSuc[suc]) mensualPorSuc[suc] = {};
+    if (!mensualPorSuc[suc][mes]) mensualPorSuc[suc][mes] = [];
+    mensualPorSuc[suc][mes].push({
+      nombre: (r['Residuo'] || '') + '',
+      imp: numOrNull_(pickField_(r, ['Importaciones', 'Imp.'])) || 0,
+      docs: {
+        'Cert. tratamiento': numOrNull_(pickField_(r, ['Cert. tratamiento', 'Cert. trat.'])),
+        'Factura': numOrNull_(r['Factura']),
+        'Cert. declaración': numOrNull_(pickField_(r, ['Cert. declaración', 'Cert. declaracion', 'Cert. decl.'])),
+        'Transportista': numOrNull_(r['Transportista']),
+        'Disposición final': numOrNull_(pickField_(r, ['Disposición final', 'Disposicion final', 'Disp. final']))
+      }
+    });
+  });
+
+  // Objetivos por sucursal: se queda con el valor del mes activo mas reciente
+  // para cada texto de objetivo (el Sheet trae 1 fila por mes).
+  var objPorSuc = {};
+  objetivosRows.forEach(function(r) {
+    var suc = (r['Sucursal'] || '') + '';
+    var texto = (r['Objetivo'] || '') + '';
+    if (!suc || !texto) return;
+    var mesIdx = MESES_ES_LIST_.indexOf((r['Mes'] || '') + '');
+    var avance = parsePct_(r['% cumplimiento']);
+    if (avance === null) avance = 0;
+    if (!objPorSuc[suc]) objPorSuc[suc] = {};
+    var prev = objPorSuc[suc][texto];
+    if (!prev || mesIdx > prev.mesIdx) {
+      objPorSuc[suc][texto] = { mesIdx: mesIdx, texto: texto, ok: avance >= 100, meta: 100, avance: avance };
+    }
+  });
+
+  var empresas = sucursales.map(function(suc) {
+    var mensual = {};
+    mesesActivos.forEach(function(mes) {
+      mensual[mes] = { residuos: (mensualPorSuc[suc] && mensualPorSuc[suc][mes]) || [] };
+    });
+    var objetivos = objPorSuc[suc] ? Object.keys(objPorSuc[suc]).map(function(k) {
+      var o = objPorSuc[suc][k];
+      return { texto: o.texto, ok: o.ok, meta: o.meta, avance: o.avance };
+    }) : [];
+    return {
+      id: slugify_(suc),
+      sucursal: suc,
+      nombre: 'Abastible',
+      logo: '',
+      color: '#175CD3',
+      colorBg: '#EFF8FF',
+      letra: iniciales_(suc),
+      mensual: mensual,
+      anual: {},
+      cse: { correo: {}, reunion: {}, encuesta: {} },
+      objetivos: objetivos
+    };
+  });
+
+  var valData = {};
+  sucursales.forEach(function(suc) {
+    valData[slugify_(suc)] = {
+      meses: valMeses[suc] || {},
+      acumulado: valAcum[suc] || {},
+      meta: valMeta[suc] || {}
+    };
+  });
+
+  return { EMPRESAS: empresas, VAL_DATA: valData, MESES_ACTIVOS: mesesActivos };
+}
+
 function doGet(e) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const startRow = 6;
@@ -216,10 +380,24 @@ function doGet(e) {
     });
   }
 
+  const valorizacionRows = readSheet('♻️ Valorización') || readSheet('Valorización');
+  const trazabilidadRows = readSheet('📊 Trazabilidad_Docs') || readSheet('Trazabilidad_Docs');
+  const objetivosRows = readSheet('🎯 Objetivos') || readSheet('Objetivos');
+
+  // Peticion JSONP (Visor-de-Objetivos-Abastible): responde con
+  // callback({EMPRESAS, VAL_DATA, MESES_ACTIVOS}) en vez de JSON plano.
+  const callback = e && e.parameter && e.parameter.callback;
+  if (callback && /^[A-Za-z0-9_]+$/.test(callback)) {
+    const legacyPayload = buildLegacyPayload_(valorizacionRows, trazabilidadRows, objetivosRows);
+    return ContentService
+      .createTextOutput(callback + '(' + JSON.stringify(legacyPayload) + ')')
+      .setMimeType(ContentService.MimeType.JAVASCRIPT);
+  }
+
   const result = {
-    valorizacion: readSheet('♻️ Valorización') || readSheet('Valorización'),
-    trazabilidad: readSheet('📊 Trazabilidad_Docs') || readSheet('Trazabilidad_Docs'),
-    objetivos: readSheet('🎯 Objetivos') || readSheet('Objetivos'),
+    valorizacion: valorizacionRows,
+    trazabilidad: trazabilidadRows,
+    objetivos: objetivosRows,
     respel: readRespelSheet_()
   };
 
