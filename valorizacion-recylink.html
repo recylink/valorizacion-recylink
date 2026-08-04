@@ -1318,7 +1318,15 @@ function calcObjetivos(anio) {
           }
 
         } else if(obj.tipo==='sinader'){
-          var rowsSinDon=rowsSM.filter(function(r){return r['Tipo de Tratamiento']!=='Donaciones';});
+          // Abastible (2026-08-04): los residuos Respel (hoja RESPEL del Sheet)
+          // no deben exigir declaracion SINADER, igual excepcion que Donaciones.
+          // Tampoco se le exige declaracion SINADER a Oficina Central (sucursal
+          // completa excluida de este objetivo).
+          var rowsSinDon=(empresaActual==='abastible' && suc==='Oficina Central')?[]:rowsSM.filter(function(r){
+            if(r['Tipo de Tratamiento']==='Donaciones') return false;
+            if(empresaActual==='abastible' && isRespel(r['Residuo'])) return false;
+            return true;
+          });
           var conDecl=rowsSinDon.filter(function(r){return r['(D) Declaracion Mensual SINADER']==='Si'||r['(D) Declaración Mensual SINADER']==='Si';}).length;
           var total=rowsSinDon.length;
           var pct2=total>0?conDecl/total*100:100;
@@ -1330,8 +1338,8 @@ function calcObjetivos(anio) {
               if(decl!=='Si'){var res=r['Residuo']||'Sin nombre';gapsSin[res]=(gapsSin[res]||0)+1;}
             });
             detalle=Object.keys(gapsSin).map(function(res){return res+': '+gapsSin[res]+' sin declaracion SINADER';}).join(' | ');
-            var nDon=rowsSM.length-total;
-            if(nDon>0)detalle+=' ('+nDon+' donacion'+(nDon!==1?'es':'')+' excluida'+(nDon!==1?'s':'')+')';
+            var nExcl=rowsSM.length-total;
+            if(nExcl>0)detalle+=' ('+nExcl+' excluida'+(nExcl!==1?'s':'')+' por donación/Respel)';
           }
 
         } else if(obj.tipo==='segregacion'){

@@ -732,6 +732,26 @@ en vez de un encabezado con un mes-año distinto por columna:
       el Code.gs actual — agrega soporte para `tipo:'totalResiduos'` y de paso corrige
       `writeObjetivos` (borraba por prefijo de empresa completo en vez de por sucursal+mes,
       con riesgo de perder histórico de objetivos al sincronizar).
+      **(2026-08-04, urgente):** el usuario ya agregó la hoja `Respel` al Sheet real (formato
+      Residuo→RESPEL TRUE/FALSE, igual que Copec/Euro) — `Code-Abastible.gs` ya tiene
+      `readRespelSheet_()` y expone `respel` en `doGet`, pero **hasta que se pegue este .gs
+      actualizado en el Apps Script real de Abastible**, el visor solo detecta como Respel
+      los residuos cuyo nombre literalmente contiene "respel" (fallback por nombre en
+      `isRespel()`), no los demás marcados TRUE en la hoja (Baterías de plomo, Tubos
+      Fluorescentes, Residuos contaminados con HC/pintura). Ver punto siguiente sobre la
+      exclusión de Respel en el objetivo SINADER.
+- [ ] Abastible (2026-08-04): a los residuos Respel no se les debe exigir declaración
+      SINADER — se agregó la exclusión en `calcObjetivos()` (rama `obj.tipo==='sinader'`,
+      `valorizacion-recylink.html`), reutilizando `isRespel()` igual que la exclusión ya
+      existente de Donaciones, pero acotada a `empresaActual==='abastible'` (no se tocó el
+      cálculo de Socovesa/Gespania/Ando que comparten el mismo tipo `sinader`). Depende del
+      punto anterior para clasificar bien todos los residuos Respel, no solo el que se llama
+      literalmente "RESPEL".
+      **También (mismo día):** tampoco se le exige declaración SINADER a la sucursal
+      "Oficina Central" de Abastible — misma rama `sinader`, `rowsSinDon` queda vacío para
+      esa sucursal (`empresaActual==='abastible' && suc==='Oficina Central'`), lo que hace
+      que `total===0` y el objetivo se muestre como 100%/sin pendientes (mismo comportamiento
+      que cuando no hay filas que exigir, no es un caso especial nuevo de la fórmula).
 - [ ] Subir la app a GitHub Pages (usuario tiene `licarayen-bit.github.io`)
 - [ ] Verificar que el Apps Script de Copec tenga la misma corrección de `writeObjetivos`
       que Socovesa (borrar por `empresa_id+mes`, no por prefijo completo) — Abastible ya

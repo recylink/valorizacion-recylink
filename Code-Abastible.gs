@@ -18,10 +18,12 @@
  *    TODAS las sucursales y meses. Ahora borra solo por
  *    empresa_id + mes exacto, igual que ya se corrigió para Socovesa.
  *
- * No se agregó lectura de una hoja "RESPEL" en doGet: Abastible no la
- * necesita, la clasificación Respel/No respel se resuelve en el JS del
- * visor por nombre de residuo (ya tiene un residuo llamado literalmente
- * "RESPEL" en sus datos).
+ * 3) NUEVO (2026-08-04): se agregó la hoja "Respel" al Sheet (mismo formato
+ *    que usa Copec/Euro: columnas Residuo | RESPEL con TRUE/FALSE). doGet
+ *    ahora la lee y la expone como "respel", igual que las otras empresas,
+ *    para que el visor use esa clasificación en vez del fallback por nombre
+ *    de residuo. Se usa para excluir los residuos Respel de la exigencia de
+ *    declaración SINADER (no se les debe exigir).
  * ============================================================
  */
 
@@ -168,6 +170,36 @@ function writeTotalResiduos(ss, data) {
   }
 }
 
+// Busca en la columna A la fila cuyo valor sea exactamente "valorEsperado"
+// (ej. "Residuo") y devuelve el número de fila (1-indexed).
+function buscarFilaEncabezadoRespel_(sheet, valorEsperado) {
+  var lastRow = Math.min(sheet.getLastRow(), 20);
+  if (lastRow < 1) return null;
+  var col = sheet.getRange(1, 1, lastRow, 1).getValues();
+  for (var i = 0; i < col.length; i++) {
+    if (String(col[i][0] || '').trim() === valorEsperado) return i + 1;
+  }
+  return null;
+}
+
+// Lee la hoja Respel (Residuo -> TRUE/FALSE), mismo formato que Copec/Euro.
+function readRespelSheet_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Respel') || ss.getSheetByName('RESPEL');
+  if (!sheet) return [];
+  var headerRow = buscarFilaEncabezadoRespel_(sheet, 'Residuo');
+  if (!headerRow) return [];
+  var lastRow = sheet.getLastRow();
+  if (lastRow <= headerRow) return [];
+  var headers = sheet.getRange(headerRow, 1, 1, 2).getValues()[0];
+  var data = sheet.getRange(headerRow + 1, 1, lastRow - headerRow, 2).getValues();
+  return data.filter(function(r) { return r[0] !== ''; }).map(function(r) {
+    var obj = {};
+    headers.forEach(function(h, i) { obj[h] = r[i]; });
+    return obj;
+  });
+}
+
 function doGet(e) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const startRow = 6;
@@ -187,7 +219,8 @@ function doGet(e) {
   const result = {
     valorizacion: readSheet('♻️ Valorización') || readSheet('Valorización'),
     trazabilidad: readSheet('📊 Trazabilidad_Docs') || readSheet('Trazabilidad_Docs'),
-    objetivos: readSheet('🎯 Objetivos') || readSheet('Objetivos')
+    objetivos: readSheet('🎯 Objetivos') || readSheet('Objetivos'),
+    respel: readRespelSheet_()
   };
 
   return ContentService
