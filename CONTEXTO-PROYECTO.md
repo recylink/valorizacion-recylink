@@ -728,25 +728,24 @@ en vez de un encabezado con un mes-año distinto por columna:
       contra datos reales de Ando todavía).
 - [ ] Abastible: crear la pestaña `Total Residuos` en su Google Sheet (headers:
       `Sucursal | Mes | Residuo | Valorizado/No Valorizado | Respel no respel | Total KG | Total M3 | Tons. CO2eq. evitadas`)
-      y pegar `Code-Abastible.gs` (raíz del repo) completo en su Apps Script real, reemplazando
-      el Code.gs actual — agrega soporte para `tipo:'totalResiduos'` y de paso corrige
-      `writeObjetivos` (borraba por prefijo de empresa completo en vez de por sucursal+mes,
-      con riesgo de perder histórico de objetivos al sincronizar).
-      **(2026-08-04, urgente):** el usuario ya agregó la hoja `Respel` al Sheet real (formato
-      Residuo→RESPEL TRUE/FALSE, igual que Copec/Euro) — `Code-Abastible.gs` ya tiene
-      `readRespelSheet_()` y expone `respel` en `doGet`, pero **hasta que se pegue este .gs
-      actualizado en el Apps Script real de Abastible**, el visor solo detecta como Respel
-      los residuos cuyo nombre literalmente contiene "respel" (fallback por nombre en
-      `isRespel()`), no los demás marcados TRUE en la hoja (Baterías de plomo, Tubos
-      Fluorescentes, Residuos contaminados con HC/pintura). Ver punto siguiente sobre la
-      exclusión de Respel en el objetivo SINADER.
-- [ ] Abastible (2026-08-04): a los residuos Respel no se les debe exigir declaración
+      — sigue pendiente. **El resto de este punto ya está hecho** (ver nota 2026-08-04 abajo):
+      el usuario ya pegó `Code-Abastible.gs` actualizado en su Apps Script real, que agrega
+      soporte para `tipo:'totalResiduos'` y corrige `writeObjetivos` (borraba por prefijo de
+      empresa completo en vez de por sucursal+mes, con riesgo de perder histórico de objetivos
+      al sincronizar).
+- [x] Abastible (2026-08-04): el usuario agregó la hoja `Respel` al Sheet real (formato
+      Residuo→RESPEL TRUE/FALSE, igual que Copec/Euro), `Code-Abastible.gs` se actualizó con
+      `readRespelSheet_()` (expone `respel` en `doGet`) y el usuario ya pegó ese `.gs`
+      actualizado en el Apps Script real de Abastible — el visor ahora debería clasificar por
+      la hoja en vez de por el fallback de nombre. **Pendiente de verificar en el visor real**
+      (no solo local) que Baterías de plomo, Tubos Fluorescentes y Residuos contaminados con
+      HC/pintura ya salgan excluidos de SINADER (antes del deploy solo se excluía el residuo
+      literal "RESPEL" por el fallback en `isRespel()`).
+- [x] Abastible (2026-08-04): a los residuos Respel no se les debe exigir declaración
       SINADER — se agregó la exclusión en `calcObjetivos()` (rama `obj.tipo==='sinader'`,
       `valorizacion-recylink.html`), reutilizando `isRespel()` igual que la exclusión ya
       existente de Donaciones, pero acotada a `empresaActual==='abastible'` (no se tocó el
-      cálculo de Socovesa/Gespania/Ando que comparten el mismo tipo `sinader`). Depende del
-      punto anterior para clasificar bien todos los residuos Respel, no solo el que se llama
-      literalmente "RESPEL".
+      cálculo de Socovesa/Gespania/Ando que comparten el mismo tipo `sinader`).
       **También (mismo día):** tampoco se le exige declaración SINADER a la sucursal
       "Oficina Central" de Abastible — misma rama `sinader`, `rowsSinDon` queda vacío para
       esa sucursal (`empresaActual==='abastible' && suc==='Oficina Central'`), lo que hace
