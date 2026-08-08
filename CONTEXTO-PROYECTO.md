@@ -602,6 +602,52 @@ Falta agregar en `doGetClasico_`/`doPost`:
 - Código completo y listo para copiar/pegar (Code.gs fusionado con estos 3 cambios ya
   integrados) en `Code.gs` en la raíz del repo.
 
+## Costo e Ingreso por residuo (agregado 2026-08-07)
+Nueva hoja de sincronización, mismo patrón que "Total Residuos": una pestaña adicional en el
+Sheet, `Costo e Ingreso`, con una fila por Sucursal+Mes+Residuo mostrando el costo de
+transporte y el ingreso por venta acumulados. Pedido explícito del usuario para poder hacer
+seguimiento del KPI costo-ingreso (objetivo `tipo:'kpi_costo'`) desde el propio Sheet, no solo
+desde el resumen agregado que ya mostraba la tarjeta de Objetivos.
+
+- **Solo para empresas con el objetivo `kpi_costo`** — hoy Abastible, Salfa, Ando y CCU. A
+  diferencia de `generaTotalResiduos` (lista de nombres de empresa hardcodeada, que ya causó el
+  bug de PMS de "se olvidó agregar la empresa nueva a la lista"), `generaCostoIngreso` en
+  `processData()` se deriva de `(emp.objetivos||[]).some(o => o.tipo==='kpi_costo')` — si en el
+  futuro se agrega este objetivo a otra empresa, la hoja se sincroniza automáticamente sin
+  tocar código.
+- Reutiliza `trazMap` (la misma agrupación Sucursal+Mes+Residuo que ya alimenta trazabilidad/
+  SINADER/KPI costo en `calcObjetivos()`), agregando 2 acumuladores nuevos al grupo:
+  `ingresoTotal` (suma de `Precio por Venta de Residuo`, antes solo se contaba `tieneIngreso`
+  como cantidad de operaciones con ingreso > 0, sin sumar el monto) y `kgTotal` (suma de
+  `Control de Peso (Kg)`, para poder calcular $/kg si se quiere). Como `trazMap` solo acumula
+  filas que pasan los mismos filtros que el KPI (estado finalizado, excluye Excavación, excluye
+  0 kg salvo PMS), los totales de esta hoja calzan exactamente con el "Costo neto" que ya
+  muestra el detalle de la tarjeta "KPI costo e ingreso".
+- **`costoTotal` ahora suma 2 columnas del Excel** (agregado 2026-08-07, a pedido del usuario):
+  `Total Costo Neto de Transporte` **+** `Costo de Tratamiento` (nombre exacto de columna
+  confirmado por el usuario). Antes solo sumaba la de transporte. Este cambio afecta por igual
+  a la hoja "Costo e Ingreso" y al "Costo neto" mostrado en el detalle de la tarjeta "KPI costo
+  e ingreso" (comparten el mismo acumulador `g.costoTotal` de `trazMap`), así que ambos
+  lugares quedan consistentes sin tocar 2 veces la misma lógica.
+- `costoIngresoRows` (nuevo estado global, junto a `totalResiduosRows`) se construye en
+  `processData()` solo si `generaCostoIngreso`, y se envía en `autoSync()` como
+  `filasCostoIngreso` (payload `{tipo:'costoIngreso', filas:[...]}`), después de `totalResiduos`
+  en la cadena de `sendPayload`. Columnas: `Sucursal | Mes | Residuo | Total KG | Costo Total |
+  Ingreso Total | Neto (Ingreso - Costo)`.
+- Apps Script: nueva función `writeCostoIngreso(ss, data)` en `Code-Abastible.gs`,
+  `Code-Salfa.gs`, `Code-Ando.gs` y `Code-CCU.gs` (los 4 `.gs` de empresas con `kpi_costo`),
+  copiada del mismo patrón que `writeTotalResiduos` (reemplazo total de las filas de datos,
+  ubica el header buscando "Sucursal" en columna A con `buscarFilaEncabezado_`, sin borrado
+  selectivo por `empresa_id` porque esta hoja no tiene esa columna). Nuevo caso
+  `tipo === 'costoIngreso'` agregado a `doPost` de los 4 archivos. No se lee de vuelta en
+  `doGet` (igual que "Total Residuos": es una hoja de solo-sincronización, para revisión manual
+  en el Sheet, no la consume el visor HTML).
+- **Pendiente manual del usuario (los 4 Sheets)**: crear la pestaña `Costo e Ingreso` en los
+  Sheets de Abastible, Salfa, Ando y CCU, con headers exactos `Sucursal | Mes | Residuo | Total
+  KG | Costo Total | Ingreso Total | Neto (Ingreso - Costo)` (en cualquier fila, igual que "Total
+  Residuos" — no hace falta que sea la fila 5), y pegar el `.gs` actualizado correspondiente en
+  el Apps Script real de cada una de las 4 empresas.
+
 ## Selector de Año en el visor de Objetivos (agregado 2026-07-27)
 Antes de este cambio, `mesesDisp` mezclaba `"YYYY-MM"` de todos los años presentes en el Excel
 cargado sin distinguirlos, así que si un Excel tenía datos de 2 años, el % Acumulado (`getAcum()`)

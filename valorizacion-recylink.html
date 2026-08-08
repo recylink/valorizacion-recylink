@@ -529,7 +529,7 @@ var SUC_ALIAS = {
 };
 
 var empresaActual = 'copec';
-var valMatrix = {}, trazRows = [], sucursales = [], mesesDisp = [], rawRows = [], totalResiduosRows = [];
+var valMatrix = {}, trazRows = [], sucursales = [], mesesDisp = [], rawRows = [], totalResiduosRows = [], costoIngresoRows = [];
 var chartInst = null;
 var sheetsObjetivosData = null;
 
@@ -685,6 +685,7 @@ function processData(rows, fname) {
   rawRows = rows;
   valMatrix = {};
   totalResiduosRows = [];
+  costoIngresoRows = [];
   acumFromSheets = {};
   var trazMap = {};
   var trMap = {}; // Sucursal+Mes+Residuo+Valorizado+Respel -> {kg,m3} (Copec y Abastible, alimenta Total Residuos)
@@ -699,6 +700,12 @@ function processData(rows, fname) {
   var esCcu = empresaActual === 'ccu';
   var esAcciona = empresaActual === 'acciona';
   var generaTotalResiduos = esCopec || esAbastible || esGespania || esSalfa || esEuro || esAndo || esPms || esCcu || esAcciona;
+  // Costo e Ingreso por residuo: solo para empresas que tienen el objetivo
+  // "KPI costo e ingreso" (tipo 'kpi_costo') — hoy Abastible, Salfa, Ando y CCU.
+  // Se deriva de emp.objetivos en vez de hardcodear la lista de empresas para
+  // no repetir el bug de "se olvido agregar la empresa nueva a la lista" que
+  // ya paso con generaTotalResiduos/metasActuales (ver CONTEXTO-PROYECTO.md).
+  var generaCostoIngreso = (emp.objetivos || []).some(function(o){ return o.tipo === 'kpi_costo'; });
 
   rows.forEach(function(r) {
     var suc = r['Sucursal']||'';
@@ -761,7 +768,7 @@ function processData(rows, fname) {
     if (!trazMap[key]) {
       var tn = (r['Razon Social Empresa Transportista']||r['Razón Social Empresa Transportista']||r['Nombre de Fantasía Empresa Transportista']||'').trim()
             || (r['RUT de Empresa Transportista']||'').trim();
-      trazMap[key]={suc:suc,mes:mes,residuo:residuo,ler:ler,transpNombre:tn,imp:0,cert:0,factura:0,decl:0,transp:0,disp:0,costoTotal:0,tieneIngreso:0,impCeroKg:0};
+      trazMap[key]={suc:suc,mes:mes,residuo:residuo,ler:ler,transpNombre:tn,imp:0,cert:0,factura:0,decl:0,transp:0,disp:0,costoTotal:0,ingresoTotal:0,kgTotal:0,tieneIngreso:0,impCeroKg:0};
     }
     var g = trazMap[key];
     g.imp++;
@@ -771,14 +778,26 @@ function processData(rows, fname) {
     if (r['(D) Declaracion Mensual SINADER']==='Si'||r['(D) Declaración Mensual SINADER']==='Si') g.decl++;
     if ((r['RUT de Empresa Transportista']+'').trim()) g.transp++;
     if ((r['RUT de Destinatario']+'').trim()) g.disp++;
-    // KPI costo: sumar costos y contar si hay ingreso (precio venta > 0)
-    var costo = parseFloat(r['Total Costo Neto de Transporte'])||0;
+    // KPI costo: sumar costos (transporte + tratamiento) y montos de ingreso
+    // (precio venta), y contar si hay ingreso (>0)
+    var costo = (parseFloat(r['Total Costo Neto de Transporte'])||0) + (parseFloat(r['Costo de Tratamiento'])||0);
     var ingreso = parseFloat(r['Precio por Venta de Residuo'])||0;
     g.costoTotal += costo;
+    g.ingresoTotal += ingreso;
+    g.kgTotal += kg;
     if (ingreso > 0) g.tieneIngreso++;
   });
 
   if (generaTotalResiduos) totalResiduosRows = Object.values(trMap);
+  // Costo e Ingreso por residuo: una fila por Sucursal+Mes+Residuo con el costo
+  // de transporte y el ingreso por venta acumulados (misma agrupacion que
+  // alimenta el KPI costo/ingreso en calcObjetivos(), para que los totales
+  // calcen con lo que muestra la tarjeta del objetivo).
+  if (generaCostoIngreso) {
+    costoIngresoRows = Object.values(trazMap).map(function(g){
+      return {suc:g.suc, mes:g.mes, residuo:g.residuo, kg:g.kgTotal, costo:g.costoTotal, ingreso:g.ingresoTotal};
+    });
+  }
   trazRows = Object.values(trazMap).sort(function(a,b){ return a.mes.localeCompare(b.mes)||a.suc.localeCompare(b.suc); });
   sucursales = Object.keys(valMatrix).sort();
   mesesDisp = [];
@@ -890,6 +909,22 @@ function autoSync(rows) {
     });
   }
 
+  // Costo e Ingreso por residuo (Abastible, Salfa, Ando y CCU hoy — cualquier
+  // empresa con el objetivo 'kpi_costo'): Sucursal | Mes | Residuo | Total KG |
+  // Costo Total | Ingreso Total | Neto (Ingreso - Costo). costoIngresoRows ya
+  // viene vacio para el resto de empresas (ver processData()).
+  var filasCostoIngreso = costoIngresoRows.map(function(r){
+    return [
+      r.suc,
+      MESES_ES[parseInt(r.mes.slice(5))],
+      r.residuo,
+      parseFloat(r.kg.toFixed(2)),
+      parseFloat(r.costo.toFixed(2)),
+      parseFloat(r.ingreso.toFixed(2)),
+      parseFloat((r.ingreso - r.costo).toFixed(2))
+    ];
+  });
+
   // Preparar payload trazabilidad
   // Euro agregó una columna Año en D de 📊 Trazabilidad_Docs (entre Mes y Residuo).
   // Se maneja aparte de emp.trazCols (que también gobierna la tabla que se ve en
@@ -942,6 +977,9 @@ function autoSync(rows) {
     })
     .then(function(){
       if (filasTotalResiduos.length) return sendPayload({tipo:'totalResiduos', filas:filasTotalResiduos});
+    })
+    .then(function(){
+      if (filasCostoIngreso.length) return sendPayload({tipo:'costoIngreso', filas:filasCostoIngreso});
     })
     .then(function(){
       var hora = new Date().toLocaleTimeString('es-CL');

@@ -36,6 +36,7 @@ function doPost(e) {
     else if (tipo === 'trazabilidad') writeTrazabilidad(ss, data);
     else if (tipo === 'objetivos') writeObjetivos(ss, data);
     else if (tipo === 'totalResiduos') writeTotalResiduos(ss, data);
+    else if (tipo === 'costoIngreso') writeCostoIngreso(ss, data);
 
     return ContentService
       .createTextOutput(JSON.stringify({ok: true}))
@@ -160,6 +161,30 @@ function writeTotalResiduos(ss, data) {
   if (!headerRow) throw new Error('No se encontro la fila de encabezado ("Sucursal") en Total Residuos');
   var startRow = headerRow + 1;
   var numCols = 7; // Sucursal | Mes | Residuo | Valorizado/No Valorizado | Respel no respel | Total KG | Total M3
+  var lastRow = sheet.getLastRow();
+  if (lastRow >= startRow) {
+    sheet.getRange(startRow, 1, lastRow - startRow + 1, numCols).clearContent();
+  }
+  if (data.filas && data.filas.length > 0) {
+    sheet.getRange(startRow, 1, data.filas.length, data.filas[0].length).setValues(data.filas);
+  }
+}
+
+// ── NUEVO: Costo e Ingreso por residuo ──
+// Alimenta el seguimiento del KPI "costo e ingreso" (objetivo kpi_costo):
+// una fila por Sucursal+Mes+Residuo con el costo de transporte y el ingreso
+// por venta acumulados. Requiere crear la pestaña "Costo e Ingreso" a mano en
+// el Sheet (headers: Sucursal | Mes | Residuo | Total KG | Costo Total |
+// Ingreso Total | Neto (Ingreso - Costo)), mismo criterio que "Total Residuos"
+// (busca el header en la columna A, no asume fila fija). Mismo patrón de
+// reemplazo total que writeTotalResiduos.
+function writeCostoIngreso(ss, data) {
+  var sheet = ss.getSheetByName('Costo e Ingreso');
+  if (!sheet) throw new Error('Hoja "Costo e Ingreso" no encontrada');
+  var headerRow = buscarFilaEncabezado_(sheet, 'Sucursal');
+  if (!headerRow) throw new Error('No se encontro la fila de encabezado ("Sucursal") en Costo e Ingreso');
+  var startRow = headerRow + 1;
+  var numCols = 7; // Sucursal | Mes | Residuo | Total KG | Costo Total | Ingreso Total | Neto (Ingreso - Costo)
   var lastRow = sheet.getLastRow();
   if (lastRow >= startRow) {
     sheet.getRange(startRow, 1, lastRow - startRow + 1, numCols).clearContent();
