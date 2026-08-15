@@ -309,7 +309,8 @@ var EMPRESAS = {
       {id:'valorizar',    nombre:'Valorizar al menos un residuo', tipo:'valorizar_residuo'},
       {id:'sinader',      nombre:'Declarar mensualmente en SINADER', tipo:'sinader'},
       {id:'reg_valorizar',nombre:'Registrar residuos a valorizar', tipo:'reg_valorizar'},
-      {id:'respel',       nombre:'Registrar retiros de Respel',   tipo:'respel'}
+      {id:'respel',       nombre:'Registrar retiros de Respel',   tipo:'respel'},
+      {id:'fgr',          nombre:'Obtener el FGR al finalizar cada proyecto', tipo:'manual'}
     ]
   },
   ando: {
@@ -1360,7 +1361,13 @@ function calcObjetivos(anio) {
           // no deben exigir declaracion SINADER, igual excepcion que Donaciones.
           // Tampoco se le exige declaracion SINADER a Oficina Central (sucursal
           // completa excluida de este objetivo).
+          // 0 kg no exige declaracion SINADER (agregado 2026-08-14, a pedido del
+          // usuario con Socovesa): mismo criterio que ya se usa para trazabilidad/
+          // KPI costo (una operacion de 0 kg no cuenta para efectos de cumplimiento
+          // documental). Aplica a todas las empresas con objetivo sinader (Socovesa,
+          // Abastible, Gespania, Ando), no solo Socovesa.
           var rowsSinDon=(empresaActual==='abastible' && suc==='Oficina Central')?[]:rowsSM.filter(function(r){
+            if((parseFloat(r['Control de Peso (Kg)'])||0) === 0) return false;
             if(r['Tipo de Tratamiento']==='Donaciones') return false;
             if(empresaActual==='abastible' && isRespel(r['Residuo'])) return false;
             return true;
@@ -1377,7 +1384,7 @@ function calcObjetivos(anio) {
             });
             detalle=Object.keys(gapsSin).map(function(res){return res+': '+gapsSin[res]+' sin declaracion SINADER';}).join(' | ');
             var nExcl=rowsSM.length-total;
-            if(nExcl>0)detalle+=' ('+nExcl+' excluida'+(nExcl!==1?'s':'')+' por donación/Respel)';
+            if(nExcl>0)detalle+=' ('+nExcl+' excluida'+(nExcl!==1?'s':'')+' por donación/Respel/0 kg)';
           }
 
         } else if(obj.tipo==='segregacion'){

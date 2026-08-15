@@ -109,16 +109,22 @@ function writeTrazabilidad(ss, data) {
 // Borra solo las filas cuyo empresa_id+mes coincide exactamente con lo que
 // se esta reinsertando (no por prefijo de empresa completo), para no perder
 // historico de objetivos de otras sucursales/meses al sincronizar.
+// FIX (2026-08-14): antes borraba por empresa_id+mes, lo que hacia que
+// sincronizar un objetivo calculado (trazabilidad, sinader, etc.) borrara de
+// paso las filas de objetivos "manual" (ej. CES) de la MISMA sucursal+mes,
+// aunque el sync nunca vuelve a mandarlas (calcObjetivos() nunca calcula un
+// estado para tipo 'manual', asi que no se reinsertan). Ahora borra por
+// empresa_id+mes+Objetivo exacto, para no arrastrar filas de otros objetivos.
 function writeObjetivos(ss, data) {
   const sheet = ss.getSheetByName('🎯 Objetivos') || ss.getSheetByName('Objetivos');
   if (!sheet) throw new Error('Hoja Objetivos no encontrada');
   const startRow = 6;
   const lastRow = sheet.getLastRow();
   if (lastRow >= startRow) {
-    const cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 3).getValues();
-    const keys = new Set(data.filas.map(f => f[0] + '|' + f[2]));
+    const cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 4).getValues();
+    const keys = new Set(data.filas.map(f => f[0] + '|' + f[2] + '|' + f[3]));
     const toDelete = [];
-    cols.forEach((r, i) => { if (keys.has(r[0] + '|' + r[2])) toDelete.push(startRow + i); });
+    cols.forEach((r, i) => { if (keys.has(r[0] + '|' + r[2] + '|' + r[3])) toDelete.push(startRow + i); });
     toDelete.reverse().forEach(r => sheet.deleteRow(r));
   }
   const insertRow = sheet.getLastRow() + 1;

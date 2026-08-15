@@ -602,6 +602,58 @@ Falta agregar en `doGetClasico_`/`doPost`:
 - Código completo y listo para copiar/pegar (Code.gs fusionado con estos 3 cambios ya
   integrados) en `Code.gs` en la raíz del repo.
 
+## writeObjetivos borraba filas manuales de otros objetivos (corregido 2026-08-14)
+Encontrado al agregar el objetivo FGR de Socovesa: `writeObjetivos` borraba las filas existentes
+que coincidieran en `empresa_id+Mes`, sin considerar cuál era el `Objetivo` de esa fila. Como los
+objetivos `tipo:'manual'` (FGR, CO2, CES, Residuos Spot, etc.) nunca se recalculan ni se re-envían
+en `autoSync()` (`calcObjetivos()` nunca les asigna un `estado`, así que no entran en `filasObj`),
+sincronizar CUALQUIER otro objetivo (trazabilidad, sinader, kpi_costo...) para la misma
+Sucursal+Mes borraba de paso la fila manual ya ingresada a mano en el Sheet, sin que nada la
+reemplazara — quedaba perdida hasta que alguien la escribiera de nuevo.
+
+- **Fix**: la clave de borrado ahora es `empresa_id+Mes+Objetivo` (agregando el texto exacto del
+  objetivo a la comparación), en vez de solo `empresa_id+Mes`. Así solo se borra la fila que
+  realmente se está reemplazando por la sincronización, sin arrastrar las demás filas de esa
+  misma sucursal+mes.
+- Aplicado en los 5 `.gs` de este repo con objetivos manuales: `Code-Euro.gs`,
+  `Code-Gespania.gs`, `Code-Ando.gs`, `Code-Acciona.gs`, `Code-CCU.gs`. **Euro es distinto**: por
+  la columna `Año` extra (columna D), el texto del Objetivo queda en el índice 4 del arreglo
+  (`f[4]`), no en el 3 como las demás — la función lee 5 columnas y compara
+  `empresa_id+Mes+Objetivo` usando ese índice corrido.
+- **Socovesa** (fuera del repo): se le pasó al usuario la función `writeObjetivos` corregida para
+  pegar directamente en su Apps Script real (mismo patrón que las demás, sin columna Año).
+- No se tocó Copec/Abastible/PMS/Salfa — hoy no tienen ningún objetivo `tipo:'manual'`, así que
+  el bug no tiene efecto observable ahí (decisión de alcance del usuario: aplicar solo donde ya
+  hay objetivos manuales).
+
+## Objetivo FGR agregado a Socovesa (agregado 2026-08-14)
+A pedido del usuario: Socovesa no tenía ningún objetivo de FGR configurado (a diferencia de
+Euro/Gespania/Acciona, que ya usaban el patrón `tipo:'manual'` para esto). Se agregó
+`{id:'fgr', nombre:'Obtener el FGR al finalizar cada proyecto', tipo:'manual'}` a
+`EMPRESAS.socovesa.objetivos`, mismo patrón exacto que el resto de objetivos `manual`: no se
+calcula desde el Excel (no hay forma de derivar el FGR — Factor de Generación de Residuos — de
+los datos de trazabilidad), el usuario ingresa el "% cumplimiento" a mano en la hoja
+`🎯 Objetivos` del Sheet de Socovesa (fila con `Objetivo` = ese texto exacto) cuando el dato esté
+disponible (al finalizar cada obra). Hasta que se llene, se muestra "--" en el visor, igual que
+los demás objetivos manuales.
+
+## SINADER no exige declaración para residuos de 0 kg (agregado 2026-08-14)
+Encontrado al investigar un reporte del usuario con Socovesa. La exclusión de "0 kg no cuenta
+para efectos de trazabilidad" (agregada 2026-07-24, ver más abajo) solo se aplicó a `trazMap`
+(la agrupación que alimenta trazabilidad/KPI costo), pero el cálculo del objetivo `sinader` en
+`calcObjetivos()` usa un array separado (`rowsSM`, filas crudas del Excel filtradas por
+Sucursal+Mes desde `rowsFin`) que nunca tenía esta exclusión — así que una operación de 0 kg sí
+exigía declaración SINADER, inconsistente con el resto del sistema.
+
+- Se agregó `if((parseFloat(r['Control de Peso (Kg)'])||0) === 0) return false;` como primer
+  filtro en `rowsSinDon` (rama `obj.tipo==='sinader'` de `calcObjetivos()`), junto a las
+  exclusiones ya existentes (Donaciones, Respel de Abastible, Oficina Central de Abastible).
+- **Decisión del usuario 2026-08-14**: aplica a las 4 empresas con objetivo `sinader` (Socovesa,
+  Abastible, Gespania, Ando), no solo a Socovesa — mismo criterio de "0 kg no cuenta" ya usado
+  de forma transversal para trazabilidad.
+- El texto de detalle de residuos excluidos (antes "excluida(s) por donación/Respel") ahora dice
+  "excluida(s) por donación/Respel/0 kg" para reflejar el nuevo motivo de exclusión.
+
 ## Costo e Ingreso por residuo (agregado 2026-08-07)
 Nueva hoja de sincronización, mismo patrón que "Total Residuos": una pestaña adicional en el
 Sheet, `Costo e Ingreso`, con una fila por Sucursal+Mes+Residuo mostrando el costo de
