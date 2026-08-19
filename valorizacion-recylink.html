@@ -250,7 +250,7 @@ var EMPRESAS = {
       {id:'valorizar_especificos',  nombre:'Valorizar fierro, madera, cartón', residuos:['Fierro','Madera','Cartón'], tipo:'valorizar_especificos'},
       {id:'fgr',                    nombre:'FGR igual o menor a 0,2',                              tipo:'manual'},
       {id:'co2',                    nombre:'Ton CO2 evitadas/M2',                                  tipo:'manual'},
-      {id:'proveedores',            nombre:'Contactar Nuevos proveedores',                         tipo:'manual'},
+      {id:'proveedores',            nombre:'Contactar Nuevos proveedores',                         tipo:'manual_anual'},
       {id:'acompanamiento',         nombre:'Acompañamiento en terreno, mediante charlas y una auditoría', tipo:'acompanamiento_anual'},
       {id:'costo',                  nombre:'Costo/Presupuesto',                                    tipo:'manual'}
     ]
@@ -426,7 +426,7 @@ function isRespel(residuo) {
   return key.indexOf('respel') >= 0;
 }
 var DOC_LABELS = {cert:'cert. tratamiento',factura:'factura',decl:'cert. declaracion',transp:'transportista',disp:'disposicion final'};
-var OBJ_ANUALES = {valorizar_residuo:1,reg_valorizar:1,respel:1,valorizar_especificos:1,acompanamiento_anual:1};
+var OBJ_ANUALES = {valorizar_residuo:1,reg_valorizar:1,respel:1,valorizar_especificos:1,acompanamiento_anual:1,manual_anual:1};
 
 var ABASTIBLE_METAS = {
   'Planta Concón': 15,
@@ -1395,7 +1395,14 @@ function calcObjetivos(anio) {
         estado=mesesVisita.length>0?'OK':'No';
         detalle=mesesVisita.length>0?mesesVisita.join(', '):'No se registraron visitas a terreno';
       }
-      results.push({suc:suc,mes:'Anual',mesKey:'anual',obj:obj.nombre,estado:estado,detalle:detalle,anual:true});
+      // tipo:'manual_anual' (ej. "Contactar Nuevos proveedores") nunca
+      // calcula un estado aca — se ingresa a mano en la fila "Anual" de
+      // 🎯 Objetivos, igual que los demas objetivos manuales. Sin el gate
+      // if(estado), se mandaria un estado vacio en cada sync y borraria lo
+      // ya ingresado a mano (mismo problema que ya se corrigio para los
+      // manuales mensuales). Los demas tipos anuales siempre asignan un
+      // estado no vacio, asi que este gate no les cambia nada.
+      if(estado)results.push({suc:suc,mes:'Anual',mesKey:'anual',obj:obj.nombre,estado:estado,detalle:detalle,anual:true});
     });
 
     // Objetivos mensuales

@@ -602,6 +602,28 @@ Falta agregar en `doGetClasico_`/`doPost`:
 - Código completo y listo para copiar/pegar (Code.gs fusionado con estos 3 cambios ya
   integrados) en `Code.gs` en la raíz del repo.
 
+## "Contactar Nuevos proveedores" pasó a ser objetivo anual (agregado 2026-08-19)
+El usuario ya venía ingresando este objetivo (`tipo:'manual'`, definido para renderizarse en la
+tabla mensual) como una fila **"Anual"** en 🎯 Objetivos — no calzaba con ningún mes de la tabla
+mensual ni con la tabla "Análisis anual" (que solo itera objetivos cuyo `tipo` está en
+`OBJ_ANUALES`), así que no se veía en ningún lado pese a tener datos reales cargados.
+
+- Se agregó un tipo nuevo **`manual_anual`** (genérico, sin cálculo — puramente para que un
+  objetivo de ingreso manual se renderice en "Análisis anual" en vez de la tabla mensual) y se
+  agregó a `OBJ_ANUALES`. `proveedores` (Euro) ahora usa este tipo.
+- El push de resultados anuales en `calcObjetivos()` ahora tiene un gate `if(estado)` (antes
+  incondicional) — necesario porque `manual_anual` nunca asigna `estado` (no hay cálculo, se lee
+  tal cual desde el Sheet), y sin el gate se mandaría un estado vacío en cada sincronización,
+  borrando el valor ya ingresado a mano (mismo problema ya corregido antes para los manuales
+  mensuales). Los demás tipos anuales existentes (`valorizar_residuo`, `reg_valorizar`, `respel`,
+  `valorizar_especificos`, `acompanamiento_anual`) siempre asignan un estado no vacío, así que
+  este gate no les cambia el comportamiento.
+- **Aviso al usuario sobre mayúsculas**: escribió "Ok" (no "OK") en la columna `% cumplimiento` —
+  el sistema compara ese valor exacto (`estado==='OK'`) para pintarlo verde y contarlo como
+  cumplido en el resumen de la sucursal; con "Ok" se sigue mostrando (cae al color por defecto),
+  pero no cuenta como "cumplido" en el conteo agregado. Se le recomendó usar "OK" en mayúsculas
+  para los próximos objetivos manuales tipo OK/No.
+
 ## "Ton CO2 evitadas/M2" ahora también se muestra en el visor (agregado 2026-08-19)
 Cambio de decisión del usuario: originalmente "Ton CO2 evitadas/M2" quedaba solo escrito en
 `%avance`, sin tocar el visor. Ahora también se muestra ahí, pero puramente informativo (sin
