@@ -251,7 +251,7 @@ var EMPRESAS = {
       {id:'fgr',                    nombre:'FGR igual o menor a 0,2',                              tipo:'manual'},
       {id:'co2',                    nombre:'Ton CO2 evitadas/M2',                                  tipo:'manual'},
       {id:'proveedores',            nombre:'Contactar Nuevos proveedores',                         tipo:'manual'},
-      {id:'acompanamiento',         nombre:'Acompañamiento en terreno, mediante charlas y una auditoría', tipo:'manual'},
+      {id:'acompanamiento',         nombre:'Acompañamiento en terreno, mediante charlas y una auditoría', tipo:'acompanamiento_anual'},
       {id:'costo',                  nombre:'Costo/Presupuesto',                                    tipo:'manual'}
     ]
   },
@@ -405,6 +405,18 @@ function isValorizado(trat) {
 // Clasificacion Respel para Copec: se carga desde la hoja RESPEL (Residuo -> TRUE/FALSE) via doGet.
 // Mientras no este cargada, se usa un fallback por nombre (igual al comportamiento anterior).
 var respelSet = {};
+
+// Datos de la hoja "% de avance" de Euro (m2 totales por obra + % Avance
+// manual por obra/mes), cargados via doGet en euroAvance.avance. Se usan
+// para calcular FGR (m3 acumulados / m2 construidos) y Ton CO2 evitadas/m2.
+var euroAvance = { m2Totales: {}, pctPorSucMes: {} };
+
+// Datos de la hoja "👥 Seguimiento_CSE" de Euro: SI/NO por Sucursal+Mes para
+// "Correo seguimiento"/"Reunión seguimiento"/"Visita a terreno". Se usa
+// "Visita a terreno" para auto-completar el objetivo "Acompañamiento en
+// terreno, mediante charlas y una auditoría" (SI = 100%, NO = 0%).
+// euroCse[suc][mesKey] = {correo, reunion, visita} (boolean|undefined).
+var euroCse = {};
 function normResiduo(s) {
   return (s+'').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
 }
@@ -414,7 +426,7 @@ function isRespel(residuo) {
   return key.indexOf('respel') >= 0;
 }
 var DOC_LABELS = {cert:'cert. tratamiento',factura:'factura',decl:'cert. declaracion',transp:'transportista',disp:'disposicion final'};
-var OBJ_ANUALES = {valorizar_residuo:1,reg_valorizar:1,respel:1,valorizar_especificos:1};
+var OBJ_ANUALES = {valorizar_residuo:1,reg_valorizar:1,respel:1,valorizar_especificos:1,acompanamiento_anual:1};
 
 var ABASTIBLE_METAS = {
   'Planta Concón': 15,
@@ -535,6 +547,17 @@ var chartInst = null;
 var sheetsObjetivosData = null;
 
 function fmt(n,dec) { dec = dec||1; return n.toFixed(dec).replace('.',','); }
+// Redondea a N cifras significativas (no decimales fijos) — para valores
+// como Ton CO2 evitadas/m2, que pueden variar en varios ordenes de magnitud
+// (ej. 0,00012345 vs 12,345) y con toFixed fijo perderian precision o
+// mostrarian ceros de mas segun el caso.
+function toSigFigs(n, sig) {
+  if (!isFinite(n) || n === 0) return 0;
+  var d = Math.ceil(Math.log10(Math.abs(n)));
+  var power = sig - d;
+  var magnitude = Math.pow(10, power);
+  return Math.round(n * magnitude) / magnitude;
+}
 function fmtPct(n) { return fmt(n)+'%'; }
 function fmtT(n) { return fmt(n)+'t'; }
 
@@ -960,6 +983,46 @@ function autoSync(rows) {
     });
   }
 
+  // Euro: FGR y Ton CO2 evitadas/m2, calculados desde el % Avance manual +
+  // m2 totales (hoja "% de avance") y el m3/CO2 acumulado del Excel. Se
+  // escriben en 2 lugares: (a) las filas "FGR"/"CO2ev/m2" de "% de avance"
+  // (valores crudos), y (b) el % cumplimiento del objetivo "FGR igual o
+  // menor a 0,2" en 🎯 Objetivos (formula proporcional 0,2/FGR*100, tope
+  // 100%), reemplazando el ingreso manual que hacía el usuario. "Ton CO2
+  // evitadas/M2" es solo informativo — no tiene meta, no se toca en
+  // 🎯 Objetivos, solo se escribe en "% de avance".
+  var filasAvance = [];
+  if (empresaActual === 'euro') {
+    var fgrCo2 = calcFgrCo2Euro();
+    var objFgr = emp.objetivos.find(function(o){ return o.tipo==='manual' && o.id==='fgr'; });
+    var fgrValores = {}, co2Valores = {};
+    Object.keys(fgrCo2).forEach(function(suc){
+      fgrValores[suc] = {};
+      co2Valores[suc] = {};
+      var anioFila = null;
+      Object.keys(fgrCo2[suc]).sort().forEach(function(mesKey){
+        var v = fgrCo2[suc][mesKey];
+        var anio = mesKey.slice(0,4);
+        anioFila = anio;
+        var mesNombre = MESES_ES[parseInt(mesKey.slice(5))].toUpperCase();
+        fgrValores[suc][mesNombre] = parseFloat(v.fgr.toFixed(3));
+        co2Valores[suc][mesNombre] = toSigFigs(v.co2m2, 5);
+        if (objFgr) {
+          var pctCump = Math.min(100, (0.2/v.fgr)*100);
+          filasObj.push([sucId(suc), suc, MESES_ES[parseInt(mesKey.slice(5))], anio, objFgr.nombre, parseFloat(pctCump.toFixed(1))+'%', 'FGR calculado: '+v.fgr.toFixed(2)+' m3/m2']);
+        }
+      });
+      if (anioFila) {
+        filasAvance.push({empresa_id:sucId(suc), Sucursal:suc, Tipo:'FGR', Año:anioFila, valores:fgrValores[suc]});
+        filasAvance.push({empresa_id:sucId(suc), Sucursal:suc, Tipo:'CO2ev/m2', Año:anioFila, valores:co2Valores[suc]});
+      }
+    });
+    // Nota: "Acompañamiento en terreno..." ya no se arma acá — al ser
+    // tipo:'acompanamiento_anual' (agregado a OBJ_ANUALES), calcObjetivos()
+    // ya lo incluye como resultado anual, y el `filasObj = calcObjetivos()...`
+    // de más arriba lo sincroniza solo, igual que respel/valorizar_residuo.
+  }
+
   var log = document.getElementById('sync-log');
   log.style.display = 'block';
 
@@ -981,6 +1044,9 @@ function autoSync(rows) {
     })
     .then(function(){
       if (filasCostoIngreso.length) return sendPayload({tipo:'costoIngreso', filas:filasCostoIngreso});
+    })
+    .then(function(){
+      if (filasAvance.length) return sendPayload({tipo:'avance', filas:filasAvance});
     })
     .then(function(){
       var hora = new Date().toLocaleTimeString('es-CL');
@@ -1023,6 +1089,41 @@ function getAcum(suc,upTo,anio){
     }
   });
   return tot===0?null:val/tot*100;
+}
+
+// Euro: FGR (m3 acumulados / m2 construidos) y Ton CO2 evitadas/m2, usando
+// el % Avance manual (acumulado) + m2 totales de la hoja "% de avance", y el
+// m3/CO2 acumulado desde el inicio de la obra hasta ese mes (Excavación
+// excluida, igual criterio que el % de valorización). Devuelve
+// {suc: {mesKey: {fgr, co2m2}}}; un mes queda fuera si no hay % Avance o
+// m2 totales cargados para esa obra todavía.
+function calcFgrCo2Euro() {
+  var out = {};
+  if (empresaActual !== 'euro') return out;
+  sucursales.forEach(function(suc) {
+    var m2Total = euroAvance.m2Totales[suc];
+    if (!m2Total) return;
+    var mesesSuc = Object.keys(valMatrix[suc]||{}).sort();
+    mesesSuc.forEach(function(mesKey) {
+      var pctAv = euroAvance.pctPorSucMes[suc] && euroAvance.pctPorSucMes[suc][mesKey];
+      if (pctAv === undefined || pctAv === null) return;
+      var m2Construidos = m2Total * (pctAv/100);
+      if (m2Construidos <= 0) return;
+      var cumM3 = 0, cumCo2 = 0;
+      mesesSuc.forEach(function(m2){
+        if (m2 > mesKey) return;
+        cumM3 += (valMatrix[suc][m2].total||0);
+      });
+      totalResiduosRows.forEach(function(r){
+        if (r.suc !== suc || r.mes > mesKey) return;
+        if (normResiduo(r.residuo) === 'excavacion') return;
+        cumCo2 += (r.co2||0);
+      });
+      out[suc] = out[suc] || {};
+      out[suc][mesKey] = { fgr: cumM3/m2Construidos, co2m2: cumCo2/m2Construidos };
+    });
+  });
+  return out;
 }
 
 function renderVal() {
@@ -1242,6 +1343,10 @@ function calcObjetivos(anio) {
     return copy;
   });
 
+  // Euro: calculado una sola vez (no por cada suc/mes/objetivo) para usarlo
+  // en las ramas 'manual' de fgr/acompanamiento mas abajo.
+  var fgrCo2EuroCalc = empresaActual === 'euro' ? calcFgrCo2Euro() : {};
+
   sucursales.forEach(function(suc){
     var rowsSuc = rowsFin.filter(function(r){return r['Sucursal']===suc;});
     if(!rowsSuc.length)return;
@@ -1279,6 +1384,16 @@ function calcObjetivos(anio) {
         if(logrados.length>0)partsV.push('<span style="color:var(--green)">✓ '+logrados.join(', ')+'</span>');
         if(faltantes.length>0)partsV.push('Falta: '+faltantes.join(', '));
         detalle=partsV.join(' · ');
+      } else if(obj.tipo==='acompanamiento_anual'){
+        // Euro: OK si hubo al menos una "Visita a terreno" (SI) en el año,
+        // detalle lista los meses exactos en que se realizó.
+        var mesesVisita=[];
+        Object.keys(euroCse[suc]||{}).sort().forEach(function(mesKey){
+          if(anio && mesKey.slice(0,4)!==anio) return;
+          if(euroCse[suc][mesKey].visita===true) mesesVisita.push(MESES_ES[parseInt(mesKey.slice(5))]);
+        });
+        estado=mesesVisita.length>0?'OK':'No';
+        detalle=mesesVisita.length>0?mesesVisita.join(', '):'No se registraron visitas a terreno';
       }
       results.push({suc:suc,mes:'Anual',mesKey:'anual',obj:obj.nombre,estado:estado,detalle:detalle,anual:true});
     });
@@ -1413,9 +1528,26 @@ function calcObjetivos(anio) {
               detalle = 'Sin costo ni ingreso registrado · Costo neto: $'+Math.round(costoTotal).toLocaleString('es-CL');
             }
           }
+        } else if(obj.tipo==='manual' && empresaActual==='euro' && obj.id==='fgr'){
+          // FGR igual o menor a 0,2: se auto-completa desde "% de avance"
+          // (m3 acumulado/m2 construidos) — % cumplimiento proporcional
+          // 0,2/FGR*100, tope 100%. Sin dato ese mes = queda "--" (igual
+          // que cuando se ingresaba a mano y no se habia llenado).
+          var vFgr = fgrCo2EuroCalc[suc] && fgrCo2EuroCalc[suc][mes];
+          if (vFgr) {
+            var pctCumpFgr = Math.min(100, (0.2/vFgr.fgr)*100);
+            estado = parseFloat(pctCumpFgr.toFixed(1))+'%';
+            detalle = 'FGR calculado: '+vFgr.fgr.toFixed(2)+' m3/m2';
+          }
+        } else if(obj.tipo==='manual' && empresaActual==='euro' && obj.id==='co2'){
+          // Ton CO2 evitadas/M2: solo informativo, sin meta — se muestra el
+          // valor calculado (acumulado) sin barra de cumplimiento ni color.
+          var vCo2 = fgrCo2EuroCalc[suc] && fgrCo2EuroCalc[suc][mes];
+          if (vCo2) detalle = 'Ton CO2 evitadas/m2 (acumulado): '+toSigFigs(vCo2.co2m2,5);
         }
 
         if(estado)results.push({suc:suc,mes:mesLabel,mesKey:mes,obj:obj.nombre,estado:estado,detalle:detalle,anual:false});
+        else if(obj.tipo==='manual' && empresaActual==='euro' && obj.id==='co2' && detalle) results.push({suc:suc,mes:mesLabel,mesKey:mes,obj:obj.nombre,estado:'',detalle:detalle,anual:false,infoOnly:true});
 
         // Para Copec: agregar sección informativa de docs adicionales
         if(obj.tipo==='trazabilidad' && emp.trazDocsInfo && emp.trazDocsInfo.length > 0) {
@@ -1613,6 +1745,60 @@ function loadSheetsData(data) {
   trazRows = [];
   rawRows = [];
   acumFromSheets = {};
+
+  // Cargar hoja "% de avance" de Euro: m2 totales por obra + % Avance manual
+  // por obra/mes. Usado para calcular FGR y Ton CO2 evitadas/m2.
+  euroAvance = { m2Totales: {}, pctPorSucMes: {} };
+  if (data.avance) {
+    euroAvance.m2Totales = data.avance.m2Totales || {};
+    (data.avance.filas || []).forEach(function(r) {
+      if (!r || (r['Tipo']||'') !== '% Avance') return;
+      var suc = (r['Sucursal']||'')+'';
+      var anio = (r['Año']||'')+'';
+      if (!suc || !anio) return;
+      Object.keys(MESES_ES).forEach(function(idx) {
+        var raw = r[MESES_ES[idx].toUpperCase()];
+        if (raw === undefined || raw === null || raw === '') return;
+        var s = (raw+'').replace('%','').replace(',','.').trim();
+        var pct = parseFloat(s);
+        if (isNaN(pct)) return;
+        if ((raw+'').indexOf('%') < 0 && pct > 0 && pct <= 1) pct = pct * 100;
+        var mesKey = anio + '-' + String(idx).padStart(2,'0');
+        euroAvance.pctPorSucMes[suc] = euroAvance.pctPorSucMes[suc] || {};
+        euroAvance.pctPorSucMes[suc][mesKey] = pct;
+      });
+    });
+  }
+
+  // Cargar hoja "👥 Seguimiento_CSE" de Euro: SI/NO por Sucursal+Accion+Mes.
+  // Sin columna Año en esta hoja — se asume el año actual (mismo criterio ya
+  // usado en el resto del sistema para hojas sin esa columna).
+  euroCse = {};
+  if (data.cse && data.cse.length > 0) {
+    data.cse.forEach(function(r) {
+      if (!r) return;
+      var suc = (r['Sucursal']||'')+'';
+      var accion = (r['Acción CSE']||r['Accion CSE']||'')+'';
+      if (!suc || !accion) return;
+      var accionLower = accion.toLowerCase();
+      var key = accionLower.indexOf('correo') >= 0 ? 'correo'
+        : accionLower.indexOf('reun') >= 0 ? 'reunion'
+        : accionLower.indexOf('visita') >= 0 ? 'visita' : null;
+      if (!key) return;
+      var anioActual = new Date().getFullYear();
+      Object.keys(MESES_ES).forEach(function(idx) {
+        var raw = r[MESES_ES[idx]];
+        if (raw === undefined || raw === null || raw === '') return;
+        var val = (raw+'').trim().toUpperCase();
+        var bVal = (val === 'SI' || val === 'SÍ') ? true : (val === 'NO' ? false : null);
+        if (bVal === null) return;
+        var mesKey = anioActual + '-' + String(idx).padStart(2,'0');
+        euroCse[suc] = euroCse[suc] || {};
+        euroCse[suc][mesKey] = euroCse[suc][mesKey] || {};
+        euroCse[suc][mesKey][key] = bVal;
+      });
+    });
+  }
 
   // Cargar lista RESPEL (Copec) desde la hoja RESPEL: Residuo -> TRUE/FALSE
   respelSet = {};

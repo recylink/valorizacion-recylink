@@ -602,6 +602,143 @@ Falta agregar en `doGetClasico_`/`doPost`:
 - Código completo y listo para copiar/pegar (Code.gs fusionado con estos 3 cambios ya
   integrados) en `Code.gs` en la raíz del repo.
 
+## "Ton CO2 evitadas/M2" ahora también se muestra en el visor (agregado 2026-08-19)
+Cambio de decisión del usuario: originalmente "Ton CO2 evitadas/M2" quedaba solo escrito en
+`%avance`, sin tocar el visor. Ahora también se muestra ahí, pero puramente informativo (sin
+barra de cumplimiento ni color, ya que no tiene meta) — mismo patrón visual que "Documentos
+adicionales" de Copec/Abastible (`estado:''` + `detalle` con el texto, `infoOnly:true`).
+Implementado en `calcObjetivos()`: nueva rama `obj.tipo==='manual' && empresaActual==='euro' &&
+obj.id==='co2'` que arma el `detalle` desde `fgrCo2EuroCalc` (mismo dato ya calculado para FGR),
+con un `results.push` aparte del gate normal `if(estado)` (que de por sí no dispararía, ya que
+esta rama nunca asigna `estado`) — mismo mecanismo que usa Copec para su fila extra de
+"Documentos adicionales". El valor se formatea con `toSigFigs(valor, 5)` (5 cifras
+significativas, agregado el mismo día a pedido del usuario).
+
+## "Acompañamiento en terreno" pasó a ser objetivo anual (agregado 2026-08-19)
+A pedido del usuario: este objetivo (antes calculado mes a mes, tipo `manual`) pasó a ser
+**anual** — se agregó un tipo nuevo `acompanamiento_anual` (distinto de `manual`, ya que
+`manual` es compartido por otros objetivos no relacionados que no deben volverse anuales), se
+agregó a `OBJ_ANUALES`, y se le agregó su propia rama en el bloque de objetivos anuales de
+`calcObjetivos()` (junto a `valorizar_residuo`/`reg_valorizar`/`respel`/`valorizar_especificos`):
+`estado='OK'` si hubo al menos una "Visita a terreno" (SI) en el año (respetando el `anio` que
+se le pase a `calcObjetivos()`, igual que los demás objetivos anuales), `detalle` = lista de los
+meses exactos en que se realizó la visita (ej. "Mayo, Julio"). Se renderiza solo en la tabla
+"Análisis anual" existente (genérica para cualquier tipo en `OBJ_ANUALES`, sin cambios de UI).
+
+- Se sacó la rama mensual que se le había agregado antes (`tipo==='manual' &&
+  obj.id==='acompanamiento'`) y el push manual correspondiente en `autoSync()` — al ser ahora
+  parte de `OBJ_ANUALES`, `calcObjetivos()` ya lo incluye como resultado anual, y el
+  `filasObj = calcObjetivos().map(...)` que ya existía en `autoSync()` lo sincroniza solo
+  (mismo mecanismo que respel/valorizar_residuo, sin código extra).
+
+## FGR/Acompañamiento no se veían en el visor recién subido el Excel (corregido 2026-08-19)
+Bug encontrado al probar: el cálculo de FGR/CO2ev/m2 y Acompañamiento en terreno se agregó
+primero solo en `autoSync()` (lo que sí sincroniza bien hacia el Sheet), pero **no** en
+`calcObjetivos()` — la función que calcula qué se muestra en pantalla justo después de subir un
+Excel (antes de volver a leer desde Sheets). Como el `switch` de tipos de objetivo en
+`calcObjetivos()` no tenía ninguna rama para `tipo:'manual'`, el visor seguía mostrando "--" para
+FGR/Acompañamiento inmediatamente después de subir el Excel, aunque el Sheet ya tuviera el valor
+correcto (síntoma reportado por el usuario: "se ve en el Excel pero no en el visor").
+
+- Se agregaron 2 ramas nuevas en `calcObjetivos()` (rama mensual, identificadas por
+  `obj.tipo==='manual' && empresaActual==='euro' && obj.id==='fgr'/'acompanamiento'`, ya que
+  `tipo:'manual'` es compartido por varios objetivos no relacionados en distintas empresas — se
+  distingue por `id` además de `tipo`), reusando exactamente la misma fórmula que `autoSync()`.
+- `fgrCo2EuroCalc = calcFgrCo2Euro()` ahora se calcula **una sola vez** antes del loop de
+  sucursales de `calcObjetivos()` (no una vez por cada combinación suc×mes×objetivo), para no
+  recalcular innecesariamente.
+- **Limitación conocida**: el loop mensual de `calcObjetivos()` solo evalúa objetivos para
+  combinaciones Sucursal+Mes que tengan al menos una fila en el Excel ese mes (`rowsSM.length`).
+  Si una obra tiene % Avance/Visita a terreno cargado para un mes sin ninguna operación de
+  trazabilidad ese mes, FGR/Acompañamiento no se mostrarían para ese mes en el render "recién
+  subido" (sí se sincronizarían igual a través de `autoSync()`/`% de avance`/🎯 Objetivos, y se
+  verían correctamente al usar "Cargar desde Sheets" después). No reportado como problema real
+  todavía, se deja documentado por si aparece.
+
+## Objetivo "Acompañamiento en terreno" automatizado en Euro (agregado 2026-08-19)
+Mismo día que el fix de FGR/CO2ev/m2: el usuario ya tenía una hoja `👥 Seguimiento_CSE` con
+estructura propia (header en la fila donde columna A dice `empresa_id`, sin fila fija —
+el usuario mencionó fila 3, pero se ubica dinámicamente con `buscarFilaEncabezado_`, igual que
+Total Residuos/RESPEL — más robusto si se inserta una fila arriba a futuro): una fila por
+Sucursal + `Acción CSE` (`Correo seguimiento` / `Reunión seguimiento` / `Visita a terreno`), con
+SI/NO por mes (headers de mes en Title Case: "Abril", "Mayo"... — sin columna Año, a diferencia
+de `% de avance`). Regla del usuario: si "Visita a terreno" es SI ese mes, el objetivo
+**"Acompañamiento en terreno, mediante charlas y una auditoría"** (antes `tipo:'manual'`) se está
+cumpliendo.
+
+- `Code-Euro.gs`: nueva `readCseSheet_()`, expuesta como `cse` en `doGet`.
+- `valorizacion-recylink.html`: nuevo global `euroCse` (`{suc: {mesKey: {correo, reunion,
+  visita}}}`), poblado en `loadSheetsData()` desde `data.cse`. **Sin columna Año en esta hoja** —
+  se asume `new Date().getFullYear()` (mismo criterio ya usado en el resto del sistema para
+  hojas sin esa columna; limitación conocida si algún día hay datos de más de un año en esta
+  hoja).
+- En `autoSync()` (mismo bloque `if (empresaActual === 'euro')` que arma FGR/CO2): por cada
+  Sucursal+Mes con dato de "Visita a terreno" (SI u NO explícito), agrega una fila a `filasObj`
+  para el objetivo `acompanamiento` con `% cumplimiento` = 100% (SI) o 0% (NO). Si no hay dato ese
+  mes, no manda nada — no pisa lo que ya haya en 🎯 Objetivos (reutiliza el `writeObjetivos` ya
+  corregido por empresa_id+mes+Objetivo).
+- **No requiere crear ninguna hoja nueva** — `👥 Seguimiento_CSE` ya existía en el Sheet de Euro
+  (se ve en la sección "Bugs..." más arriba, listada entre las hojas con datos de otras empresas
+  por venir de plantilla clonada — esta automatización sí la usa activamente ahora).
+- **Pendiente del usuario**: pegar el `Code-Euro.gs` actualizado (mismo archivo que ya incluye el
+  fix de FGR/CO2ev/m2) y redesplegar.
+
+## Cálculo automático de FGR y CO2ev/m2 en Euro (agregado 2026-08-19)
+**Nombre real de la pestaña: `%avance`** (sin espacios) — el usuario la describió como "% de
+avance" en la conversación, pero el nombre literal de la hoja es distinto. Bug encontrado 2026-08-19
+al probar: `readAvanceSheet_()`/`writeAvance()` buscaban `ss.getSheetByName('% de avance')` y no
+encontraban la hoja (devolvían `{m2Totales:{}, filas:[]}` en silencio, sin error — confirmado
+inspeccionando `euroAvance`/`calcFgrCo2Euro()` vía consola del navegador, ambos vacíos). Corregido
+buscando `ss.getSheetByName('%avance') || ss.getSheetByName('% de avance')` en ambas funciones,
+mismo patrón de fallback por nombre que ya usan las demás hojas de este archivo. El resto de esta
+sección usa "`% de avance`" como referencia narrativa, pero el nombre real de la pestaña en el
+Sheet es `%avance`.
+
+El usuario creó una hoja nueva `% de avance` en el Sheet de Euro para ingresar a mano el % de
+avance de construcción de cada obra (acumulado, ej. 28% → 36% → 56%). Combinado con el m2 total
+de cada obra (que también conoce), puede derivar m2 construidos, y con eso calcular FGR (m3
+generados / m2 construidos) y Ton CO2 evitadas/m2 — cálculo que hacía a mano. Se automatizó
+completo.
+
+**Formato de la hoja `% de avance`** (distinto a las 3 hojas estándar, sin filas decorativas):
+- Fila 1: `Sucursal` | nombre de cada obra, una por columna (ej. "Proyecto Departamental").
+- Fila 2: `m2 totales` | el m2 total de esa obra, alineado con la fila 1.
+- Fila 3: vacía.
+- Fila 4: headers `empresa_id | Sucursal | Tipo | Año | MAYO | JUNIO | ... | DICIEMBRE` (el rango
+  de meses del header puede no empezar en Enero — se lee dinámicamente, no se asume fijo).
+- Fila 5+: 3 filas por obra — `% Avance` (ingreso manual, se deja intacto), `FGR` y `CO2ev/m2`
+  (antes vacías, ahora las llena el visor automáticamente en cada sincronización).
+
+**Decisiones de cálculo (confirmadas por el usuario 2026-08-19)**:
+- FGR y CO2ev/m2 se calculan con m3/CO2 **acumulados desde el inicio de la obra** hasta ese mes
+  (no solo el mes puntual) — consistente con que el % Avance también es acumulado.
+- **Excavación se excluye** del m3/CO2 usado (mismo criterio que ya excluye Excavación del %
+  de valorización en todas las empresas). Para el m3, esto ya viene gratis: `valMatrix` de Euro
+  ya excluye Excavación (`excluirDeVal`), así que `calcFgrCo2Euro()` solo filtra Excavación
+  manualmente para el CO2 (que viene de `totalResiduosRows`, que sí incluye Excavación).
+- El objetivo **"FGR igual o menor a 0,2"** (antes `tipo:'manual'`, ingreso a mano en 🎯
+  Objetivos) ahora se auto-completa: `% cumplimiento = min(100, 0,2/FGR × 100)` — proporcional,
+  no binario (si el FGR es el doble de la meta, marca 50%, no 0%).
+- El objetivo **"Ton CO2 evitadas/M2"** queda solo informativo — no tiene meta definida, no se
+  toca en 🎯 Objetivos, solo se escribe el valor calculado en `% de avance`.
+
+**Implementación**:
+- `valorizacion-recylink.html`: nuevo global `euroAvance` (`m2Totales` + `pctPorSucMes`),
+  poblado en `loadSheetsData()` desde `data.avance` (nuevo campo del `doGet`). Nueva función
+  `calcFgrCo2Euro()` que devuelve `{suc: {mesKey: {fgr, co2m2}}}`. En `autoSync()`, para Euro:
+  construye `filasAvance` (payload `{tipo:'avance', filas:[...]}`, un objeto por fila con
+  `valores` indexado por **nombre de mes** en vez de por posición — evita que el cliente tenga
+  que adivinar el rango exacto de columnas del header) y agrega filas extra a `filasObj` para el
+  % cumplimiento del objetivo FGR (reutiliza el `writeObjetivos` ya corregido por
+  empresa_id+mes+Objetivo, así que solo actualiza esa fila sin tocar las demás).
+- `Code-Euro.gs`: `readAvanceSheet_()` (lee filas 1-2 para `m2Totales`, filas 4+ para los datos)
+  expuesto como `avance` en `doGet`. `writeAvance()` (nuevo caso en `doPost`) actualiza in-place
+  las filas `FGR`/`CO2ev/m2` por `Sucursal+Tipo+Año`, escribiendo cada mes por nombre de columna
+  (busca el header en la hoja real) — nunca toca las filas `% Avance`, el cliente nunca envía ese
+  tipo.
+- **Pendiente del usuario**: pegar el `Code-Euro.gs` actualizado en el Apps Script real y
+  redesplegar (nueva versión, misma URL) para que el cálculo se sincronice de verdad.
+
 ## writeObjetivos borraba filas manuales de otros objetivos (corregido 2026-08-14)
 Encontrado al agregar el objetivo FGR de Socovesa: `writeObjetivos` borraba las filas existentes
 que coincidieran en `empresa_id+Mes`, sin considerar cuál era el `Objetivo` de esa fila. Como los

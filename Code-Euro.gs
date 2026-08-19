@@ -30,6 +30,7 @@ function doPost(e) {
     else if (tipo === 'trazabilidad') writeTrazabilidad(ss, data);
     else if (tipo === 'objetivos') writeObjetivos(ss, data);
     else if (tipo === 'totalResiduos') writeTotalResiduos(ss, data);
+    else if (tipo === 'avance') writeAvance(ss, data);
 
     return ContentService
       .createTextOutput(JSON.stringify({ok: true}))
@@ -190,6 +191,121 @@ function readRespelSheet_() {
   });
 }
 
+// ── "% de avance" (FGR y Ton CO2 evitadas/m2, agregado 2026-08-19) ──
+// Formato particular, distinto a las hojas estandar: fila 1 = "Sucursal" +
+// nombre de cada obra por columna, fila 2 = "m2 totales" + el m2 de cada
+// obra alineado con la fila 1, fila 3 vacia, fila 4 = headers
+// (empresa_id|Sucursal|Tipo|Año|MESES...), fila 5+ = datos (3 filas por
+// obra: "% Avance" ingresado a mano, "FGR" y "CO2ev/m2" calculados por el
+// visor).
+function readAvanceSheet_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('%avance') || ss.getSheetByName('% de avance');
+  if (!sheet) return { m2Totales: {}, filas: [] };
+
+  var lastCol = sheet.getLastColumn();
+  var lastRow = sheet.getLastRow();
+
+  var m2Totales = {};
+  if (lastRow >= 2 && lastCol >= 2) {
+    var fila1 = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+    var fila2 = sheet.getRange(2, 1, 1, lastCol).getValues()[0];
+    for (var c = 1; c < lastCol; c++) {
+      var suc = String(fila1[c] || '').trim();
+      if (!suc) continue;
+      var raw = fila2[c];
+      var m2 = typeof raw === 'number' ? raw : parseFloat(String(raw || '').replace(/\./g, '').replace(',', '.'));
+      if (!isNaN(m2)) m2Totales[suc] = m2;
+    }
+  }
+
+  var headerRow = 4, startRow = 5;
+  var filas = [];
+  if (lastRow >= startRow) {
+    var headers = sheet.getRange(headerRow, 1, 1, lastCol).getValues()[0];
+    var data = sheet.getRange(startRow, 1, lastRow - startRow + 1, lastCol).getValues();
+    data.forEach(function (r) {
+      if (String(r[1] || '').trim() === '') return;
+      var obj = {};
+      headers.forEach(function (h, i) { if (h) obj[h] = r[i]; });
+      filas.push(obj);
+    });
+  }
+
+  return { m2Totales: m2Totales, filas: filas };
+}
+
+// Actualiza in-place las filas "FGR"/"CO2ev/m2" de "% de avance" (calculadas
+// por el visor), escribiendo cada mes por NOMBRE de columna (no por
+// posicion) para no depender de que el cliente conozca el rango exacto de
+// meses del header — la hoja puede empezar en cualquier mes, no
+// necesariamente Enero. Nunca toca las filas "% Avance" (ingreso manual):
+// el cliente solo envia filas con Tipo 'FGR' o 'CO2ev/m2'.
+function writeAvance(ss, data) {
+  var sheet = ss.getSheetByName('%avance') || ss.getSheetByName('% de avance');
+  if (!sheet) throw new Error('Hoja "% de avance" no encontrada');
+  var startRow = 5, headerRow = 4;
+  var lastCol = sheet.getLastColumn();
+  var headers = sheet.getRange(headerRow, 1, 1, lastCol).getValues()[0];
+  var colByMes = {};
+  headers.forEach(function (h, i) { if (h) colByMes[String(h).trim().toUpperCase()] = i + 1; });
+
+  var lastRow = sheet.getLastRow();
+  var existentes = lastRow >= startRow
+    ? sheet.getRange(startRow, 1, lastRow - startRow + 1, 4).getValues()
+    : [];
+
+  (data.filas || []).forEach(function (fila) {
+    var suc = fila.Sucursal, tipo = fila.Tipo, anio = String(fila['Año'] || '');
+    var targetRow = null;
+    for (var i = 0; i < existentes.length; i++) {
+      var r = existentes[i];
+      if (String(r[1]).trim() === suc && String(r[2]).trim() === tipo && String(r[3]) === anio) {
+        targetRow = startRow + i;
+        break;
+      }
+    }
+    if (!targetRow) {
+      targetRow = sheet.getLastRow() + 1;
+      sheet.getRange(targetRow, 1, 1, 4).setValues([[fila.empresa_id || '', suc, tipo, anio]]);
+    } else if (fila.empresa_id) {
+      sheet.getRange(targetRow, 1).setValue(fila.empresa_id);
+    }
+    Object.keys(fila.valores || {}).forEach(function (mesNombre) {
+      var col = colByMes[mesNombre.toUpperCase()];
+      if (!col) return;
+      sheet.getRange(targetRow, col).setValue(fila.valores[mesNombre]);
+    });
+  });
+}
+
+// ── "👥 Seguimiento_CSE" (Acompañamiento en terreno, agregado 2026-08-19) ──
+// Header en la fila donde columna A dice literalmente "empresa_id" (se
+// busca dinamicamente, no se asume fila fija — el usuario indicó fila 3,
+// pero por consistencia con el resto de hojas custom de este archivo se
+// ubica igual que Total Residuos/RESPEL). Una fila por Sucursal+Acción CSE
+// (Correo seguimiento / Reunión seguimiento / Visita a terreno), con
+// SI/NO por mes. Sin columna Año — el cliente asume el año actual, mismo
+// criterio que ya usa el resto del sistema para hojas sin esa columna.
+function readCseSheet_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('👥 Seguimiento_CSE') || ss.getSheetByName('Seguimiento_CSE');
+  if (!sheet) return [];
+  var headerRow = buscarFilaEncabezado_(sheet, 'empresa_id');
+  if (!headerRow) return [];
+  var startRow = headerRow + 1;
+  var lastRow = sheet.getLastRow();
+  if (lastRow < startRow) return [];
+  var lastCol = sheet.getLastColumn();
+  var headers = sheet.getRange(headerRow, 1, 1, lastCol).getValues()[0];
+  var data = sheet.getRange(startRow, 1, lastRow - startRow + 1, lastCol).getValues();
+  return data.filter(function (r) { return String(r[1] || '').trim() !== ''; }).map(function (r) {
+    var obj = {};
+    headers.forEach(function (h, i) { if (h) obj[h] = r[i]; });
+    return obj;
+  });
+}
+
 function doGet(e) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const startRow = 6;
@@ -210,7 +326,9 @@ function doGet(e) {
     valorizacion: readSheet('♻️ Valorización') || readSheet('Valorización'),
     trazabilidad: readSheet('📊 Trazabilidad_Docs') || readSheet('Trazabilidad_Docs'),
     objetivos: readSheet('🎯 Objetivos') || readSheet('Objetivos'),
-    respel: readRespelSheet_()
+    respel: readRespelSheet_(),
+    avance: readAvanceSheet_(),
+    cse: readCseSheet_()
   };
 
   return ContentService
