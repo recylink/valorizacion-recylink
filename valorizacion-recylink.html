@@ -271,7 +271,7 @@ var EMPRESAS = {
       {id:'trazabilidad',  nombre:'100% trazabilidad',                              tipo:'trazabilidad'},
       {id:'sinader',       nombre:'cumplir declaración SINADER',                    tipo:'sinader'},
       {id:'kpi_costo',     nombre:'KPI Costo ingreso',                              tipo:'kpi_costo'},
-      {id:'segregacion',   nombre:'Asegurar una correcta segregación de residuos',  tipo:'segregacion'}
+      {id:'segregacion',   nombre:'Asegurar una correcta segregación de residuos',  tipo:'segregacion_anual'}
     ]
   },
   gespania: {
@@ -289,8 +289,7 @@ var EMPRESAS = {
     objetivos: [
       {id:'trazabilidad', nombre:'100% trazabilidad',                     tipo:'trazabilidad'},
       {id:'sinader',      nombre:'Declarar mensualmente en sinader',      tipo:'sinader'},
-      {id:'fgr',          nombre:'Lograr un FGR de 0,2 m3/m2',            tipo:'manual'},
-      {id:'valorizar_kg', nombre:'valorizar un 5% de residuos en kg',     tipo:'manual'}
+      {id:'fgr',          nombre:'Lograr un FGR de 0,2 m3/m2',            tipo:'manual_anual'}
     ]
   },
   socovesa: {
@@ -310,7 +309,7 @@ var EMPRESAS = {
       {id:'sinader',      nombre:'Declarar mensualmente en SINADER', tipo:'sinader'},
       {id:'reg_valorizar',nombre:'Registrar residuos a valorizar', tipo:'reg_valorizar'},
       {id:'respel',       nombre:'Registrar retiros de Respel',   tipo:'respel'},
-      {id:'fgr',          nombre:'Obtener el FGR al finalizar cada proyecto', tipo:'manual'}
+      {id:'fgr',          nombre:'Obtener el FGR al finalizar cada proyecto', tipo:'manual_anual'}
     ]
   },
   ando: {
@@ -328,8 +327,7 @@ var EMPRESAS = {
     objetivos: [
       {id:'trazabilidad',    nombre:'100% trazabilidad',                                              tipo:'trazabilidad'},
       {id:'sinader',         nombre:'Cumplimiento normativa SINADER',                                  tipo:'sinader'},
-      {id:'sensibilizacion', nombre:'Generar sensibilización, concientización y cultura ambiental',    tipo:'manual'},
-      {id:'valorizar_peso',  nombre:'Valorizar un 5% de residuos en peso',                              tipo:'manual'},
+      {id:'sensibilizacion', nombre:'Generar sensibilización, concientización y cultura ambiental',    tipo:'manual_anual'},
       {id:'kpi_costo',       nombre:'Incorporar KPI de costo - valorización',                          tipo:'kpi_costo'}
     ]
   },
@@ -364,7 +362,7 @@ var EMPRESAS = {
     objetivos: [
       {id:'trazabilidad',    nombre:'100% trazabilidad',          tipo:'trazabilidad'},
       {id:'kpi_costo',       nombre:'Tener KPI Costo - Ingreso',   tipo:'kpi_costo'},
-      {id:'residuos_spot',   nombre:'Gestionar Residuos Spot',     tipo:'manual'}
+      {id:'residuos_spot',   nombre:'Gestionar Residuos Spot',     tipo:'manual_anual'}
     ]
   },
   acciona: {
@@ -426,7 +424,7 @@ function isRespel(residuo) {
   return key.indexOf('respel') >= 0;
 }
 var DOC_LABELS = {cert:'cert. tratamiento',factura:'factura',decl:'cert. declaracion',transp:'transportista',disp:'disposicion final'};
-var OBJ_ANUALES = {valorizar_residuo:1,reg_valorizar:1,respel:1,valorizar_especificos:1,acompanamiento_anual:1,manual_anual:1};
+var OBJ_ANUALES = {valorizar_residuo:1,reg_valorizar:1,respel:1,valorizar_especificos:1,acompanamiento_anual:1,manual_anual:1,segregacion_anual:1};
 
 var ABASTIBLE_METAS = {
   'Planta Concón': 15,
@@ -1397,6 +1395,17 @@ function calcObjetivos(anio) {
         });
         estado=mesesVisita.length>0?'OK':'No';
         detalle=mesesVisita.length>0?mesesVisita.join(', '):'No se registraron visitas a terreno';
+      } else if(obj.tipo==='segregacion_anual'){
+        // Correcta segregacion (Salfa, ahora anual): OK si aparece algun
+        // residuo que no sea Escombro/Excavacion/Domiciliario en todo el año.
+        var genericosSeg={escombro:1,excavacion:1,domiciliario:1,domiciliarios:1};
+        var otrosResAnual=[];
+        rowsSuc.forEach(function(r){
+          var keySeg=normResiduo(r['Residuo']);
+          if(keySeg && !genericosSeg[keySeg] && otrosResAnual.indexOf(r['Residuo'])<0) otrosResAnual.push(r['Residuo']);
+        });
+        estado=otrosResAnual.length>0?'OK':'No';
+        detalle=otrosResAnual.length>0?otrosResAnual.join(', '):'Solo Escombro/Excavación/Domiciliario registrados este año';
       }
       // tipo:'manual_anual' (ej. "Contactar Nuevos proveedores") nunca
       // calcula un estado aca — se ingresa a mano en la fila "Anual" de
@@ -1491,10 +1500,13 @@ function calcObjetivos(anio) {
           // KPI costo (una operacion de 0 kg no cuenta para efectos de cumplimiento
           // documental). Aplica a todas las empresas con objetivo sinader (Socovesa,
           // Abastible, Gespania, Ando), no solo Socovesa.
+          // Respel tampoco exige declaracion SINADER (agregado 2026-08-20, a pedido
+          // del usuario): antes solo se excluia para Abastible, ahora aplica a
+          // TODAS las empresas con objetivo sinader.
           var rowsSinDon=(empresaActual==='abastible' && suc==='Oficina Central')?[]:rowsSM.filter(function(r){
             if((parseFloat(r['Control de Peso (Kg)'])||0) === 0) return false;
             if(r['Tipo de Tratamiento']==='Donaciones') return false;
-            if(empresaActual==='abastible' && isRespel(r['Residuo'])) return false;
+            if(isRespel(r['Residuo'])) return false;
             return true;
           });
           var conDecl=rowsSinDon.filter(function(r){return r['(D) Declaracion Mensual SINADER']==='Si'||r['(D) Declaración Mensual SINADER']==='Si';}).length;
@@ -1511,18 +1523,6 @@ function calcObjetivos(anio) {
             var nExcl=rowsSM.length-total;
             if(nExcl>0)detalle+=' ('+nExcl+' excluida'+(nExcl!==1?'s':'')+' por donación/Respel/0 kg)';
           }
-
-        } else if(obj.tipo==='segregacion'){
-          // Correcta segregacion: OK si aparece algun residuo que no sea
-          // Escombro/Excavacion/Domiciliario ese mes (Salfa).
-          var genericosSeg={escombro:1,excavacion:1,domiciliario:1,domiciliarios:1};
-          var otrosRes=[];
-          trazSM.forEach(function(r){
-            var keySeg=normResiduo(r.residuo);
-            if(keySeg && !genericosSeg[keySeg] && otrosRes.indexOf(r.residuo)<0) otrosRes.push(r.residuo);
-          });
-          estado=otrosRes.length>0?'OK':'No';
-          detalle=otrosRes.length>0?otrosRes.join(', '):'Solo Escombro/Excavación/Domiciliario registrados este mes';
 
         } else if(obj.tipo==='kpi_costo'){
           // KPI costo e ingreso: OK si hay costo de transporte O ingreso por venta (cualquiera > 0)
@@ -1578,6 +1578,22 @@ function calcObjetivos(anio) {
   return results;
 }
 
+// Convierte el estado/detalle de un objetivo a un score 0-100 para el
+// promedio de "salud" de la sucursal (ver renderCopecObjetivos). OK=100,
+// No=0, "N retiros" (respel) = 100 (es un texto de exito, no un %), un
+// numero/porcentaje se usa tal cual (tope 100), y si no hay estado pero si
+// detalle (objetivos informativos como CO2ev/m2, que nunca asignan estado)
+// cuenta 100 si hay dato, 0 si no hay nada.
+function scoreObjSalud_(estado, detalle){
+  if (estado === 'OK') return 100;
+  if (estado === 'No') return 0;
+  if (estado && (estado+'').indexOf('retiro') >= 0) return 100;
+  if (estado) {
+    var n = parseFloat((estado+'').replace(',','.').replace('%',''));
+    if (!isNaN(n)) return Math.min(100, Math.max(0, n));
+  }
+  return detalle ? 100 : 0;
+}
 function objColor(estado){
   if(estado==='OK')return 'var(--green)';
   if(estado==='No')return 'var(--red)';
@@ -2164,22 +2180,40 @@ function renderCopecObjetivos() {
       ? (acum !== null && acum >= meta ? 'var(--green)' : acum !== null && acum >= meta*0.7 ? 'var(--yellow)' : 'var(--red)')
       : 'var(--text-muted)';
 
-    // % global: (trazabilidad acumulada + cumplimiento val) / 2
-    var trazScoreAll = 0, trazCountAll = 0;
-    mesesAnio.forEach(function(m) {
-      var r = objBySucMes[suc+'|'+m+'|100% trazabilidad'];
-      if (r && r.estado) {
-        var n = parseFloat((r.estado+'').replace(',','.').replace('%',''));
-        if (!isNaN(n)) { trazScoreAll += Math.min(100,n); trazCountAll++; }
+    // % global (salud de la sucursal) = promedio de TODOS los objetivos de
+    // la empresa, cada uno contando como 1 unidad (decision del usuario
+    // 2026-08-20, reemplaza el calculo anterior que solo promediaba
+    // trazabilidad+valorizacion). Un objetivo mensual promedia primero sus
+    // meses CON dato (no cuenta meses sin ningun registro) antes de entrar
+    // al promedio general — asi no pesa mas que uno anual solo por tener
+    // mas meses. Objetivos sin ningun dato en todo el año cuentan 0%;
+    // objetivos informativos sin meta numerica (ej. CO2ev/m2, que solo
+    // llena "detalle" y nunca "estado") cuentan 100% si tienen algun valor
+    // calculado, 0% si no. Mismo codigo para las 10 empresas.
+    var objScoresAll = (emp.objetivos || []).map(function(o){
+      if (OBJ_ANUALES[o.tipo]) {
+        var rAnu = objAnualBySuc[suc+'|'+o.nombre];
+        return rAnu ? scoreObjSalud_(rAnu.estado, rAnu.detalle) : 0;
       }
+      var valsMes = [];
+      mesesAnio.forEach(function(m){
+        var rMes = objBySucMes[suc+'|'+m+'|'+o.nombre];
+        if (rMes && (rMes.estado || rMes.detalle)) valsMes.push(scoreObjSalud_(rMes.estado, rMes.detalle));
+      });
+      return valsMes.length ? (valsMes.reduce(function(s,v){return s+v;},0)/valsMes.length) : 0;
     });
-    var trazAcum = trazCountAll > 0 ? trazScoreAll/trazCountAll : null;
-    var valCumplimiento = (meta !== null && acum !== null) ? Math.min(100, acum/meta*100) : null;
-    var pctGlobal = 0;
-    if (trazAcum !== null && valCumplimiento !== null) pctGlobal = (trazAcum + valCumplimiento) / 2;
-    else if (trazAcum !== null) pctGlobal = trazAcum;
-    else if (valCumplimiento !== null) pctGlobal = valCumplimiento;
-    var colorGlobal = pctGlobal>=100?'var(--green)':pctGlobal>=60?'var(--yellow)':'var(--red)';
+    // % de valorizacion vs. meta cuenta como una unidad mas del promedio,
+    // igual que antes del cambio del 2026-08-20 — independiente de si hay
+    // una fila de "objetivo" visible para eso (ej. las de Gespania/Ando que
+    // se quitaron de la UI). Solo se agrega si la sucursal tiene meta
+    // definida; si no, no aporta ni resta unidades al promedio. Mismo
+    // criterio para las 10 empresas.
+    if (meta !== null && acum !== null) objScoresAll.push(Math.min(100, acum/meta*100));
+    var pctGlobal = objScoresAll.length ? objScoresAll.reduce(function(s,v){return s+v;},0)/objScoresAll.length : 0;
+    // 3 estados de salud (agregado 2026-08-20, a pedido del usuario):
+    // 0-49% Acción (rojo), 50-74% Atención (amarillo), 75-100% OK (verde).
+    var estadoSalud = pctGlobal>=75?'OK':pctGlobal>=50?'Atención':'Acción';
+    var colorGlobal = pctGlobal>=75?'var(--green)':pctGlobal>=50?'var(--yellow)':'var(--red)';
 
     // Encabezado sucursal
     var header = document.createElement('div');
@@ -2188,7 +2222,7 @@ function renderCopecObjetivos() {
       +'<div style="display:flex;align-items:center;gap:10px;flex-shrink:0">'
       +'<div style="width:100px;background:var(--surface2);border-radius:4px;height:6px;overflow:hidden">'
       +'<div style="width:'+pctGlobal.toFixed(0)+'%;height:6px;border-radius:4px;background:'+colorGlobal+'"></div></div>'
-      +'<span style="font-size:14px;font-weight:700;color:'+colorGlobal+'">'+pctGlobal.toFixed(0)+'%</span>'
+      +'<span style="font-size:14px;font-weight:700;color:'+colorGlobal+'">'+estadoSalud+' · '+pctGlobal.toFixed(0)+'%</span>'
       +(meta!==null?'<span style="font-size:11px;color:var(--text-muted)">Meta val.: '+meta+'%</span>':'')
       +(acum!==null?'<span style="font-size:13px;font-weight:600;color:'+colorAcum+'">'+fmtPct(acum)+' acum.</span>':'')
       +'</div>';

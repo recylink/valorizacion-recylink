@@ -602,6 +602,106 @@ Falta agregar en `doGetClasico_`/`doPost`:
 - Código completo y listo para copiar/pegar (Code.gs fusionado con estos 3 cambios ya
   integrados) en `Code.gs` en la raíz del repo.
 
+## 3 estados de salud: Acción/Atención/OK (agregado 2026-08-20)
+Se agregaron etiquetas de texto al indicador de "% global"/salud de la sucursal, con umbrales
+nuevos (antes eran 100/60 con solo color, sin etiqueta):
+- **0-49%** → **"Acción"**, rojo.
+- **50-74%** → **"Atención"**, amarillo.
+- **75-100%** → **"OK"**, verde.
+
+Se muestra como `"OK · 82%"` (etiqueta + porcentaje) junto al nombre de la sucursal, en vez de
+solo el número. Los umbrales de color (`colorGlobal`) se movieron de 100/60 a 75/50 para que
+coincidan exactamente con los 3 rangos.
+
+## % de valorización vs. meta vuelve a contar para la salud (ajuste 2026-08-20)
+Al rehacer el "% global" como promedio de `emp.objetivos`, se perdió sin querer el aporte del
+% de valorización vs. meta para las empresas que **no** tienen una fila de objetivo explícita
+para eso (la mayoría — solo Gespania/Ando tenían una, y se acaban de quitar de la UI). El
+usuario aclaró que ese aporte debe seguir contando igual que antes del rediseño, para todas las
+empresas, independiente de si hay una fila visible o no (mismo criterio "implícito" que ya
+usaban Acciona/Euro, donde tampoco hay una fila de objetivo para esto).
+
+- Se agregó `Math.min(100, acum/meta*100)` como **una unidad más** del arreglo `objScoresAll`
+  (después de calcular los objetivos explícitos), solo cuando la sucursal tiene `meta` definida
+  — si no, no aporta ni resta unidades del promedio. Mismo criterio para las 10 empresas.
+- Con esto, quitar "valorizar un 5% de residuos en kg/peso" de la UI de Gespania/Ando **no**
+  quita su aporte a la salud — el aporte real ahora viene directo de `meta`/`acum` (que ya se
+  calculaban en el header de todas formas para las badges "Meta val."/"X% acum."), no de la fila
+  de objetivo que se eliminó.
+
+## Objetivos duplicados eliminados del visor (agregado 2026-08-20)
+A pedido del usuario, se quitaron por completo de `EMPRESAS.gespania.objetivos` y
+`EMPRESAS.ando.objetivos` las entradas **"valorizar un 5% de residuos en kg"** (Gespania) y
+**"Valorizar un 5% de residuos en peso"** (Ando) — ya estaban documentadas desde que se agregaron
+como duplicados en la práctica del % Real/Meta 2026 que ya muestra la tabla genérica de
+Valorización, y ahora se quitaron del array en vez de solo dejarlas documentadas como redundantes.
+Al no estar en `emp.objetivos`, desaparecen de toda la UI (tabla mensual, "Análisis anual", y del
+promedio de "% global"/salud de la sucursal, que itera `emp.objetivos` completo) — no requiere
+ningún otro cambio de código.
+
+## Más objetivos convertidos a anuales (agregado 2026-08-20)
+Mismo criterio que los anteriores (Contactar Nuevos proveedores / CES / FGR Socovesa):
+
+- **Gespania — "Lograr un FGR de 0,2 m3/m2"**: `manual` → `manual_anual` (reutiliza el tipo,
+  sin código nuevo).
+- **CCU — "Gestionar Residuos Spot"**: `manual` → `manual_anual` (idem).
+- **Ando — "Generar sensibilización, concientización y cultura ambiental"**: `manual` →
+  `manual_anual`.
+- **Salfa — "Asegurar una correcta segregación de residuos"**: caso distinto — este objetivo
+  **sí tenía cálculo real** (`tipo:'segregacion'`, evaluado mes a mes: OK si ese mes aparece
+  algún residuo que no sea Escombro/Excavación/Domiciliario). Se creó un tipo nuevo
+  `segregacion_anual` (agregado a `OBJ_ANUALES`) con la misma lógica pero evaluada sobre
+  **todo el año** (`rowsSuc` en vez de `trazSM` del mes) — OK si en cualquier mes del año
+  apareció un residuo no genérico, detalle lista esos residuos. Se eliminó la rama mensual
+  `tipo==='segregacion'` (quedó sin uso, ningún objetivo la referencia ya).
+
+## Objetivo FGR de Socovesa pasó a ser anual (agregado 2026-08-20)
+Mismo tratamiento que "Contactar Nuevos proveedores" (Euro) y CES (Acciona): el objetivo `fgr`
+de Socovesa ("Obtener el FGR al finalizar cada proyecto") cambió de `tipo:'manual'` a
+`tipo:'manual_anual'` — se reutiliza el tipo ya existente, sin código nuevo. Se ingresa como fila
+"Anual" en 🎯 Objetivos y se muestra en "Análisis anual" en vez de la tabla mensual. No hay
+conflicto con el `id:'fgr'` de Euro (que sí tiene cálculo automático) porque esa rama especial
+está acotada a `empresaActual==='euro'` además de por `tipo`.
+
+## Respel excluido de SINADER en TODAS las empresas (agregado 2026-08-20)
+La exclusión de Respel de la exigencia de declaración SINADER (agregada 2026-08-04) estaba
+acotada solo a Abastible (`empresaActual==='abastible' && isRespel(...)`). A pedido del usuario,
+se sacó esa restricción — ahora aplica a las 5 empresas con objetivo `sinader` (Socovesa,
+Abastible, Salfa, Gespania, Ando) por igual. `isRespel()` sigue funcionando igual para todas: usa
+la hoja RESPEL si la empresa la tiene, y si no, cae al fallback por nombre (substring "respel").
+
+## "% global" (salud de la sucursal) rehecho: promedio de TODOS los objetivos (2026-08-20)
+El usuario cuestionó la fórmula anterior del "% global" que se muestra junto a cada sucursal en
+la pestaña Objetivos: `(trazabilidad acumulada + cumplimiento de valorización) / 2` — solo 2
+componentes fijos, ignorando el resto de los objetivos de la empresa (SINADER, KPI costo,
+segregación, FGR, respel, manuales, etc.). Se reemplazó por un promedio real de **todos** los
+objetivos definidos para esa empresa.
+
+**Decisiones de diseño (confirmadas por el usuario)**:
+- Cada **objetivo cuenta como 1 unidad** en el promedio final, sin importar si es mensual o
+  anual — un objetivo mensual promedia primero sus meses con dato (ignora meses sin ningún
+  registro, no los cuenta como 0) y ese promedio entra como un solo valor, para no pesar más que
+  un objetivo anual solo por tener más meses con datos.
+- Un objetivo **sin ningún dato en todo el año** (ni un mes, ni la fila anual) cuenta **0%**.
+- Objetivos **informativos sin meta numérica** (ej. "Ton CO2 evitadas/M2", que nunca asigna
+  `estado`, solo `detalle`) cuentan **100% si tienen algún valor calculado, 0% si no** — mismo
+  criterio "existe dato = cumplido" que los objetivos sin dato.
+- Aplica igual a las **10 empresas** (mismo código compartido, sin excepciones por empresa).
+
+**Implementación**: nueva función `scoreObjSalud_(estado, detalle)` (convierte cualquier
+`estado` a un número 0-100: `OK`→100, `No`→0, texto con "retiro" —ej. respel: "2 retiros"— →100
+porque es texto de éxito no un %, número/porcentaje →tal cual con tope 100, sin estado pero con
+detalle →100, sin nada →0) y el bloque de `pctGlobal` en `renderCopecObjetivos()` ahora itera
+`emp.objetivos` completo (anuales vía `objAnualBySuc`, mensuales vía `objBySucMes` promediando
+por mes) en vez de buscar solo la fila `"100% trazabilidad"` y la meta de valorización.
+**Bug evitado en el diseño**: el objetivo `respel` de Socovesa nunca usa `"OK"`, usa un texto
+como `"2 retiros"` cuando se cumple — sin el chequeo especial de la palabra "retiro",
+`scoreObjSalud_` habría intentado leer "2" como 2% (`parseFloat` toma el número inicial de un
+string), mostrando un cumplido real como casi-fallido.
+- `meta`/`acum`/`colorAcum` (las badges "Meta val.: X%" y "Y% acum." del header, aparte del %
+  global) no se tocaron — siguen mostrando lo mismo que antes, solo cambió el número/barra
+  principal de "salud".
+
 ## "Apoyar en obtención de puntos para certificación CES..." pasó a ser anual (agregado 2026-08-20)
 Mismo tratamiento que "Contactar Nuevos proveedores" (Euro): el objetivo `ces` de Acciona
 cambió de `tipo:'manual'` a `tipo:'manual_anual'` (ya agregado a `OBJ_ANUALES` desde el cambio
