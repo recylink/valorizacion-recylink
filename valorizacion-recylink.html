@@ -767,8 +767,11 @@ function processData(rows, fname) {
     // se excluyen de trazabilidad, solo del % de valorizacion.
     var esEscombroArena = esAcciona && (normResiduo(residuo) === 'escombro' || normResiduo(residuo) === 'arena');
     var excluirDeVal = (esCopec && respel) || esExcavacion || esEscombroArena;
-    // Euro mide % de valorizacion por volumen (m3) en vez de peso (kg), unica excepcion.
-    var metricaVal = esEuro ? m3 : kg;
+    // Euro y Acciona miden % de valorizacion por volumen (m3) en vez de peso
+    // (kg) — excepcion agregada para Acciona 2026-08-19, a pedido del
+    // usuario, mismo mecanismo ya usado para Euro. El resto de las empresas
+    // sigue usando kg sin cambios.
+    var metricaVal = (esEuro || esAcciona) ? m3 : kg;
     if (!excluirDeVal) {
       valMatrix[suc][mes].total+=metricaVal;
       if (valorizado) valMatrix[suc][mes].val+=metricaVal;

@@ -602,6 +602,30 @@ Falta agregar en `doGetClasico_`/`doPost`:
 - Código completo y listo para copiar/pegar (Code.gs fusionado con estos 3 cambios ya
   integrados) en `Code.gs` en la raíz del repo.
 
+## Code-Acciona.gs del repo desactualizado respecto al real (sincronizado 2026-08-20)
+El usuario pegó el contenido de su Apps Script real de Acciona para confirmar el cambio de
+volumen, y resultó tener funciones que no estaban en este repo: soporte JSONP (`?callback=`,
+necesario porque el visor real de Acciona carga los datos con `<script src="...">` en vez de
+`fetch()`) y manejo completo de una pestaña `Minuta` (`readMinutaRows_`/`writeMinutas`,
+`?minutas=1` en `doGet`, `tipo:'minutas'` en `doPost`) — ninguna de las 2 documentada antes en
+este archivo.
+
+**Importante — regresión evitada**: esa versión real **no tenía** el fix de `writeObjetivos` del
+2026-08-14 (borrar por `empresa_id+mes+Objetivo`, no solo `empresa_id+mes`) — el archivo del que
+partió el JSONP/Minutas parece ser una copia previa a ese fix. Al sincronizar el repo con la
+versión real, se **reaplicó** el fix de `writeObjetivos` sobre la base JSONP/Minutas (no se pisó).
+**Pendiente del usuario**: pegar este `Code-Acciona.gs` combinado en el Apps Script real y
+redesplegar, para que el fix de `writeObjetivos` quede vigente ahí también.
+
+## Acciona mide % de valorización por volumen (m3), no peso (agregado 2026-08-19)
+Mismo mecanismo que ya existía para Euro (única excepción hasta ahora): en `processData()`,
+`metricaVal` reemplaza `kg` por `m3` en la acumulación de `valMatrix[suc][mes].total/val`. Se
+cambió `var metricaVal = esEuro ? m3 : kg;` a `var metricaVal = (esEuro || esAcciona) ? m3 : kg;`
+— una sola línea, reutilizando la variable `esAcciona` que ya existía en `processData()` (usada
+para la exclusión de Escombro/Arena). Las demás empresas siguen midiendo por kg sin cambios.
+`Total Residuos` sigue trackeando ambos (kg y m3) igual que siempre, no se tocó — el cambio es
+solo en el % de valorización mostrado en la pestaña Valorización y usado por `getPct`/`getAcum`.
+
 ## "Contactar Nuevos proveedores" pasó a ser objetivo anual (agregado 2026-08-19)
 El usuario ya venía ingresando este objetivo (`tipo:'manual'`, definido para renderizarse en la
 tabla mensual) como una fila **"Anual"** en 🎯 Objetivos — no calzaba con ningún mes de la tabla

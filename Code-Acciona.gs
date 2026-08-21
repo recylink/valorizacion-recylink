@@ -2,29 +2,42 @@
  * ============================================================
  * RECYLINK · Apps Script del Sheet de Acciona
  * ============================================================
- * Proyecto de Apps Script nuevo, para vincular al Sheet de Acciona
- * (ID 1t89jBSO8bQ7XXhh-CYQ2bs9cC-Ph-WVv9kbCCvEBqAk). No existía Apps
- * Script previo para esta empresa — el Sheet es un clon recién creado
- * de la plantilla "Portal de Trazabilidad" (sin datos reales todavía).
- *
  * Mismo esquema que Code-Gespania.gs / Code-Salfa.gs / Code-Euro.gs /
  * Code-Ando.gs / Code-PMS.gs / Code-CCU.gs: writeObjetivos borra solo por
- * empresa_id + mes exacto (no por prefijo de empresa completo),
- * soporte para tipo:'totalResiduos', y doGet expone la hoja RESPEL
- * propia del Sheet (Residuo -> TRUE/FALSE).
+ * empresa_id + mes + Objetivo exacto (no por prefijo de empresa completo
+ * ni solo por empresa_id+mes), soporte para tipo:'totalResiduos', y doGet
+ * expone la hoja RESPEL propia del Sheet (Residuo -> TRUE/FALSE).
  *
- * Requiere que el Sheet tenga las pestañas "Total Residuos" (headers:
- * Sucursal | Mes | Residuo | Valorizado/No Valorizado | Respel no respel
- * | Total KG | Total M3) y "RESPEL" (headers: Residuo | RESPEL) ya
- * creadas — el Sheet clonado ya trae ambas listas para usar. Igual que
- * Ando/PMS/CCU, Acciona NO usa las columnas Año ni Tons. CO2eq. evitadas
- * (esas 2 quedan exclusivas de Euro / del grupo original respectivamente).
+ * CAMBIOS (2026-08-20) respecto a la versión anterior:
+ * 1. doGet ahora envuelve la respuesta en JSONP cuando llega ?callback=...
+ *    (el visor carga los datos con un <script src="..."> y necesita esto;
+ *    sin el wrapper, el navegador recibe un objeto JSON "pelado" que no es
+ *    JS válido como sentencia y el visor nunca dispara su callback).
+ * 2. doGet soporta ?minutas=1 para devolver las filas crudas de la pestaña
+ *    "Minuta" (necesario para la sección de Minutas del visor).
+ * 3. doPost soporta tipo:'minutas' para guardar los cambios de Minutas de
+ *    vuelta en la pestaña "Minuta", y acepta tanto POST con body JSON
+ *    (fetch) como POST vía formulario oculto (fallback cuando fetch falla
+ *    por CORS: llega como e.parameter.payload en vez de e.postData.contents).
+ * 4. writeObjetivos: reaplicado el fix del 2026-08-14 (borrar por
+ *    empresa_id+mes+Objetivo, no solo empresa_id+mes) — la versión que
+ *    traía este archivo antes de agregar JSONP/Minutas no lo tenía, así
+ *    que sincronizar un objetivo calculado (trazabilidad, etc.) borraba de
+ *    paso las filas de objetivos "manual" (ej. CES) de la MISMA
+ *    sucursal+mes sin que nada las reemplazara.
  * ============================================================
  */
 
 function doPost(e) {
   try {
-    const data = JSON.parse(e.postData.contents);
+    var data;
+    if (e.parameter && e.parameter.payload) {
+      // Fallback vía formulario oculto (application/x-www-form-urlencoded)
+      data = JSON.parse(e.parameter.payload);
+    } else {
+      // Camino normal: fetch() con body JSON
+      data = JSON.parse(e.postData.contents);
+    }
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const tipo = data.tipo;
 
@@ -33,6 +46,7 @@ function doPost(e) {
     else if (tipo === 'trazabilidad') writeTrazabilidad(ss, data);
     else if (tipo === 'objetivos') writeObjetivos(ss, data);
     else if (tipo === 'totalResiduos') writeTotalResiduos(ss, data);
+    else if (tipo === 'minutas') writeMinutas(ss, data);
 
     return ContentService
       .createTextOutput(JSON.stringify({ok: true}))
@@ -106,9 +120,10 @@ function writeTrazabilidad(ss, data) {
   });
 }
 
-// Borra solo las filas cuyo empresa_id+mes coincide exactamente con lo que
-// se esta reinsertando (no por prefijo de empresa completo), para no perder
-// historico de objetivos de otras sucursales/meses al sincronizar.
+// Borra solo las filas cuyo empresa_id+mes+Objetivo coincide exactamente con
+// lo que se esta reinsertando (no por prefijo de empresa completo, ni solo
+// por empresa_id+mes), para no perder historico de objetivos de otras
+// sucursales/meses/objetivos al sincronizar.
 // FIX (2026-08-14): antes borraba por empresa_id+mes, lo que hacia que
 // sincronizar un objetivo calculado (trazabilidad, sinader, etc.) borrara de
 // paso las filas de objetivos "manual" (ej. CES) de la MISMA sucursal+mes,
@@ -190,7 +205,73 @@ function readRespelSheet_() {
   });
 }
 
+// ── Minutas ──
+
+// Lee TODAS las celdas de la pestaña "Minuta" tal cual están (título de
+// sesión, sub-encabezado Tema/Revisado/Detalle/Acuerdos/Resuelto, e ítems),
+// como array de arrays — el visor hace su propio parseo de estructura
+// (mnRowsToSessions) porque distintos clientes usan órdenes de columna
+// distintos.
+function readMinutaRows_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Minuta');
+  if (!sheet) return [];
+  var lastRow = sheet.getLastRow();
+  var lastCol = Math.max(sheet.getLastColumn(), 5);
+  if (lastRow < 1) return [];
+  return sheet.getRange(1, 1, lastRow, lastCol).getValues();
+}
+
+// Guarda de vuelta las sesiones editadas en el visor. Cada sesión trae
+// headerRow/dataStartRow/colMap tal cual se leyeron al cargar, así que
+// escribe en las mismas filas/columnas de origen sin reordenar la hoja.
+function writeMinutas(ss, data) {
+  var sheet = ss.getSheetByName(data.sheetName || 'Minuta');
+  if (!sheet) throw new Error('Hoja "' + (data.sheetName || 'Minuta') + '" no encontrada');
+
+  (data.sessions || []).forEach(function (sess) {
+    if (sess.headerRow) {
+      sheet.getRange(sess.headerRow, 1).setValue(sess.title || '');
+    }
+    var colMap = sess.colMap || { item: 0, cumplido: 1, comentario: 2, acuerdos: 3, revisado: 4 };
+    var startRow = sess.dataStartRow;
+    if (!startRow) return;
+    (sess.items || []).forEach(function (it, idx) {
+      var row = startRow + idx;
+      sheet.getRange(row, colMap.item + 1).setValue(it.item || '');
+      sheet.getRange(row, colMap.cumplido + 1).setValue(it.cumplido ? 'TRUE' : 'FALSE');
+      sheet.getRange(row, colMap.comentario + 1).setValue(it.comentario || '');
+      sheet.getRange(row, colMap.acuerdos + 1).setValue(it.acuerdos || '');
+      sheet.getRange(row, colMap.revisado + 1).setValue(it.revisado ? 'TRUE' : 'FALSE');
+    });
+  });
+}
+
 function doGet(e) {
+  var params = (e && e.parameter) || {};
+  var callback = params.callback;
+
+  // Envuelve la respuesta en JSONP cuando el visor pide ?callback=... (así
+  // funciona el <script src="..."> que usa cargarDatos()/mnFetchSheet()).
+  // Sin callback, se comporta como antes: JSON plano.
+  function respond(obj) {
+    var json = JSON.stringify(obj);
+    if (callback) {
+      return ContentService
+        .createTextOutput(callback + '(' + json + ')')
+        .setMimeType(ContentService.MimeType.JAVASCRIPT);
+    }
+    return ContentService
+      .createTextOutput(json)
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+
+  // ── Minutas: ?minutas=1 ──
+  if (params.minutas === '1') {
+    return respond({ rows: readMinutaRows_() });
+  }
+
+  // ── Payload normal del visor de objetivos ──
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const startRow = 6;
 
@@ -213,7 +294,5 @@ function doGet(e) {
     respel: readRespelSheet_()
   };
 
-  return ContentService
-    .createTextOutput(JSON.stringify(result))
-    .setMimeType(ContentService.MimeType.JSON);
+  return respond(result);
 }
