@@ -602,6 +602,12 @@ Falta agregar en `doGetClasico_`/`doPost`:
 - Código completo y listo para copiar/pegar (Code.gs fusionado con estos 3 cambios ya
   integrados) en `Code.gs` en la raíz del repo.
 
+## "Apoyar en obtención de puntos para certificación CES..." pasó a ser anual (agregado 2026-08-20)
+Mismo tratamiento que "Contactar Nuevos proveedores" (Euro): el objetivo `ces` de Acciona
+cambió de `tipo:'manual'` a `tipo:'manual_anual'` (ya agregado a `OBJ_ANUALES` desde el cambio
+anterior, sin código nuevo — se reutiliza directamente). Ahora se ingresa como fila "Anual" en
+🎯 Objetivos y se muestra en la tabla "Análisis anual" en vez de la mensual.
+
 ## Code-Acciona.gs del repo desactualizado respecto al real (sincronizado 2026-08-20)
 El usuario pegó el contenido de su Apps Script real de Acciona para confirmar el cambio de
 volumen, y resultó tener funciones que no estaban en este repo: soporte JSONP (`?callback=`,
