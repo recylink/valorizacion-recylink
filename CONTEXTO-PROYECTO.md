@@ -700,6 +700,13 @@ con scroll (`max-height:340px;overflow-y:auto`) y un alto interno que crece con 
 empresas (`Math.max(300, n*34)` px), más `maintainAspectRatio:false` y
 `scales.y.ticks.autoSkip:false` para forzar que se dibujen todas las etiquetas.
 
+**N° de sucursales por empresa en el panel de salud (2026-08-21)**: `renderSaludPanel()` ahora
+muestra la cantidad de sucursales junto al nombre de cada empresa en la cabecera de su fila,
+p.ej. "Euro (9 suc.)". Es simplemente `f.sucs.length` (el arreglo ya calculado por
+`calcSaludEmpresa_`, después de aplicar la exclusión de sucursales cerradas/fijas); no se
+muestra el "(0 suc.)" cuando no hay datos, ya que ese caso ya se distingue con la etiqueta
+"Sin datos"/"Error" del promedio.
+
 ## 3 estados de salud: Acción/Atención/OK (agregado 2026-08-20)
 Se agregaron etiquetas de texto al indicador de "% global"/salud de la sucursal, con umbrales
 nuevos (antes eran 100/60 con solo color, sin etiqueta):

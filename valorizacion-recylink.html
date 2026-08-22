@@ -2851,9 +2851,12 @@ function renderSaludPanel() {
         + '<span class="salud-suc-nombre">'+s.suc+'</span>'
         + '<span class="salud-badge" style="background:'+c+'">'+s.estado+' '+Math.round(s.pct)+'%</span></div>';
     }).join('');
+    var nSucs = f.sucs.length;
     return '<div class="salud-empresa-row">'
       + '<div class="salud-empresa-head">'
-      +   '<span class="salud-empresa-nombre salud-empresa-expand" data-id="'+f.id+'">'+f.nombre+'</span>'
+      +   '<span class="salud-empresa-nombre salud-empresa-expand" data-id="'+f.id+'">'+f.nombre
+      +     (nSucs ? ' <span style="font-weight:400;color:var(--text-muted)">('+nSucs+' suc.)</span>' : '')
+      +   '</span>'
       +   '<span class="salud-empresa-nav" data-id="'+f.id+'" title="Ver objetivos de '+f.nombre+'">&#8599;</span>'
       +   '<span class="salud-badge" style="background:'+colorAvg+'">'+labelAvg+'</span>'
       + '</div>'
