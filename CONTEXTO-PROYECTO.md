@@ -602,6 +602,104 @@ Falta agregar en `doGetClasico_`/`doPost`:
 - Código completo y listo para copiar/pegar (Code.gs fusionado con estos 3 cambios ya
   integrados) en `Code.gs` en la raíz del repo.
 
+## Panel de salud multi-empresa + análisis estadístico (agregado 2026-08-20)
+Nueva funcionalidad grande, probada en vivo contra las 10 empresas reales y funcionando: un
+panel lateral (drawer) que muestra la salud de **todas** las sucursales de **todas** las
+empresas a la vez, sin necesidad de subir ningún Excel, más una ventana de análisis estadístico.
+
+**Decisiones de diseño (confirmadas por el usuario)**:
+- Carga las 10 empresas automáticamente al abrir la app (una vez, cacheado en memoria), con
+  botón "↻ Actualizar" para refrescar a demanda — punto medio entre "recargar siempre" (más
+  lento, 10 peticiones cada vez) y "solo empresas visitadas" (más liviano pero incompleto).
+- Ranking a nivel de **empresa** (promedio de sus sucursales) con toggle Peor→Mejor/Mejor→Peor,
+  y dentro de cada empresa (expandible) sus sucursales en el mismo orden.
+- Ventana de análisis: distribución de sucursales por estado (Acción/Atención/OK, conteo y %) +
+  gráfico de torta con esos mismos 3 estados (agregado a pedido del usuario) + gráfico de barras
+  comparando la salud promedio entre empresas (ambos con Chart.js, ya usado en el gráfico de
+  Valorización — `statsPieChartInst` y `statsChartInst`, cada uno con su propio `<canvas>`).
+
+**Implementación** (`valorizacion-recylink.html`, sin cambios de Apps Script):
+- Todas las funciones de cálculo son **standalone** — reciben el payload crudo del `doGet` de
+  cada empresa como parámetro y no tocan ningún estado global de la empresa activa
+  (`valMatrix`/`sucursales`/`rawRows`/`metasFromSheets`/`acumFromSheets`/etc.), para poder
+  calcular las 10 en paralelo sin pisar lo que el usuario está viendo en pantalla:
+  - `parseObjetivosRows_(objetivosRows)` — mismo parseo que ya usaba `renderCopecObjetivos()`
+    en modo Sheets, **extraído y refactorizado** para reusarlo en ambos lugares (evita duplicar
+    la lógica en 2 sitios que se desincronicen con el tiempo).
+  - `parseValorizacionRows_(valorizacionRows)` — extrae sucursales, `Meta %` y `% Acumulado`
+    por sucursal desde las filas crudas de la hoja Valorización.
+  - `resolveMetaEmpresa_(companyId, sucursalesList, metaFromSheet)` — mismo orden de prioridad
+    que ya usa cada empresa (fija en código > Sheet > localStorage), parametrizado por empresa
+    en vez de depender de `empresaActual`.
+  - `isSucExcluidaFija_(suc)` — mismo `SUCURSALES_EXCLUIDAS`, pero sin las "sucursales
+    cerradas" por localStorage de la empresa activa (esa es una preferencia de UI del
+    navegador de quien está viendo, no un dato del Sheet — limitación conocida y aceptada).
+  - `calcSaludEmpresa_(companyId, data)` — combina todo lo anterior + `scoreObjSalud_` (ya
+    existente) para devolver `[{suc, pct, estado}, ...]` de una empresa, mismo criterio exacto
+    que el "% global" de la empresa activa.
+  - `cargarSaludTodas()` — `Promise.all` sobre `Object.keys(EMPRESAS)`, cada una con su propio
+    `fetch(scriptUrl, {mode:'cors'})`; guarda resultados en `saludPorEmpresa` (o `'error'` si
+    falla esa empresa puntual, sin tumbar las demás) y llama `renderSaludPanel()`.
+- UI nueva: botón flotante `🏥` (fixed, borde izquierdo) abre un drawer (`position:fixed`,
+  `translateX` para animar entrada/salida) con la lista de empresas expandibles + modal de
+  estadísticas (overlay centrado). CSS agregado al final del `<style>` existente, HTML agregado
+  como hermano de `.app` (no dentro, para que el `position:fixed` no herede el `max-width`
+  centrado del layout principal).
+- `renderCopecObjetivos()` se refactorizó para llamar a `parseObjetivosRows_()` en vez de tener
+  la lógica de parseo duplicada inline.
+
+**"Fijar" panel agregado (mismo día, a pedido del usuario)**: por defecto, abrir el panel muestra
+un overlay oscuro que tapa el resto de la pantalla — no se puede ver el ranking y el contenido
+principal a la vez. Botón "📌" nuevo en el header del drawer: al fijar, el panel queda abierto
+permanentemente **al lado** del contenido (sin overlay — `.app` se corre a la derecha via la
+clase `.app-con-salud`, `margin:0 0 0 336px`), y la preferencia se guarda en
+`localStorage.salud_pinned` para que persista entre recargas (`abrirSaludDrawer()` se llama en
+`DOMContentLoaded` si estaba fijado). Cerrar con "×" siempre desfija (no solo cierra) — modelo
+mental simple: fijado = panel lateral no bloqueante, sin fijar = drawer/modal que tapa hasta
+cerrarlo. `irASaludDestino()` (navegación) ya no cierra el panel si está fijado, para que se
+pueda seguir navegando entre empresas/sucursales sin perderlo de vista. Probado en vivo:
+fijar mantiene el contenido interactivo (cambio de pestaña funcionó con el panel abierto),
+persiste tras recargar, y "×" desfija correctamente.
+
+**Navegación agregada (mismo día)**: click en una sucursal del panel navega directo a la
+pestaña Objetivos de esa empresa con esa sucursal ya seleccionada en el filtro (`f-obj-suc`);
+un ícono `↗` junto al nombre de cada empresa navega a sus Objetivos en general ("Todas" las
+sucursales). Nueva función `irASaludDestino(companyId, sucursal)`: replica el mismo mecanismo
+que ya usa el selector de empresa (`empresaActual = id`, `resetData()`, activar pill/tab), y
+encadena `.then()` sobre `loadFromSheets()` para fijar el filtro de sucursal una vez que
+terminó de cargar — para esto `loadFromSheets()` ahora hace `return fetch(...)` (antes no
+retornaba la promesa, nadie la necesitaba encadenar desde afuera). Probado en vivo: clic en
+"Novatec Pucará" (Salfa) llevó correctamente a Salfa/Objetivos con esa sucursal seleccionada;
+clic en el ↗ de Gespania llevó a Gespania/Objetivos con "Todas".
+
+**Bug real encontrado y corregido durante la prueba en vivo (2026-08-20)**: Salfa mostraba
+`NaN%` — la sucursal "Novatec Pucará" tiene `Meta % = 0` (nunca configurada) y `% Acumulado = 0`,
+así que `acum/meta*100` = `0/0*100` = `NaN`, que se propaga a través de la suma del promedio y
+contaminaba el % de salud de **toda la empresa**, no solo esa sucursal. Corregido agregando
+`meta > 0` a la condición en **ambos** lugares donde se hace este cálculo (`calcSaludEmpresa_`
+del panel multi-empresa, y el `pctGlobal` de la empresa activa en `renderCopecObjetivos()` —
+mismo bug potencial ahí, aunque no se había manifestado todavía). Encontrado probando contra
+datos reales de las 10 empresas vía Claude en Chrome, no solo revisando el código.
+
+**Sucursales cerradas excluidas del panel de salud (2026-08-21)**: `calcSaludEmpresa_()` solo
+excluía sucursales de la lista fija `SUCURSALES_EXCLUIDAS`, ignorando las "🏢 Sucursales
+cerradas" que el usuario marca a mano por empresa (feature existente, guardada en
+`localStorage['sucursales_excluidas']`, gestionada por `getSucursalesExcluidasUI()`/
+`setSucursalesExcluidasUI()`). Corregido: `getSucursalesExcluidasUI(companyId)` ahora acepta
+un `companyId` opcional (antes solo leía `empresaActual`, que no sirve al calcular las 10
+empresas en paralelo desde el panel); y la función de exclusión (renombrada
+`isSucExcluidaParaSalud_(companyId, suc)`) chequea ambas listas — la fija y la de cerradas de
+esa empresa. Así una sucursal cerrada desde el botón de una empresa deja de contar en el
+promedio de salud de esa empresa en el panel multi-empresa.
+
+**Gráfico de barras del análisis estadístico no mostraba todos los nombres de empresa
+(2026-08-21)**: el contenedor `.chart-wrap` tiene alto fijo (300px) y Chart.js le hace
+`autoSkip` a las etiquetas del eje de categorías cuando no entran todas en ese alto — con 10
+empresas se salteaba varias. Corregido: el gráfico de barras ahora vive en un contenedor propio
+con scroll (`max-height:340px;overflow-y:auto`) y un alto interno que crece con la cantidad de
+empresas (`Math.max(300, n*34)` px), más `maintainAspectRatio:false` y
+`scales.y.ticks.autoSkip:false` para forzar que se dibujen todas las etiquetas.
+
 ## 3 estados de salud: Acción/Atención/OK (agregado 2026-08-20)
 Se agregaron etiquetas de texto al indicador de "% global"/salud de la sucursal, con umbrales
 nuevos (antes eran 100/60 con solo color, sin etiqueta):

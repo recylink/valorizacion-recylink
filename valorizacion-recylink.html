@@ -80,6 +80,48 @@ tbody tr:hover{background:var(--surface2)}
 .section-title{font-size:14px;font-weight:600}
 #toast{position:fixed;bottom:20px;right:20px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:10px 16px;font-size:13px;color:var(--text);box-shadow:0 4px 16px rgba(0,0,0,.1);z-index:9999;transform:translateY(80px);opacity:0;transition:all .25s;max-width:340px}
 #toast.show{transform:translateY(0);opacity:1}
+
+/* Panel de salud multi-empresa (agregado 2026-08-20) */
+.salud-toggle-btn{position:fixed;left:0;top:110px;z-index:40;background:var(--surface);border:1px solid var(--border);border-left:none;border-radius:0 8px 8px 0;padding:10px 8px;font-size:17px;cursor:pointer;box-shadow:2px 0 6px rgba(0,0,0,.08)}
+.salud-drawer{position:fixed;left:0;top:0;height:100vh;width:320px;max-width:88vw;background:var(--surface);border-right:1px solid var(--border);box-shadow:2px 0 16px rgba(0,0,0,.14);transform:translateX(-100%);transition:transform .25s ease;z-index:50;overflow-y:auto;padding:16px;box-sizing:border-box}
+.salud-drawer.open{transform:translateX(0)}
+.salud-drawer-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.salud-drawer-title{font-size:15px;font-weight:700;color:var(--text)}
+.salud-close-btn{background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-muted);line-height:1;padding:0 4px}
+#btn-salud-pin{font-size:15px;border-radius:5px}
+#btn-salud-pin.active{background:var(--accent);color:#fff}
+/* Fijado: el panel no tapa el contenido, se corre a la derecha en vez de superponerse */
+.app-con-salud{margin:0 0 0 336px}
+@media (max-width:900px){ .app-con-salud{margin-left:24px} }
+.salud-orden-toggle{display:flex;border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:8px}
+.salud-orden-btn{flex:1;padding:7px 4px;font-size:11px;font-weight:600;background:var(--surface2);border:none;cursor:pointer;color:var(--text-muted)}
+.salud-orden-btn.active{background:var(--accent);color:#fff}
+.salud-overlay{position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:45;display:none}
+.salud-overlay.open{display:block}
+.salud-list{margin-top:10px}
+.salud-empresa-row{border:1px solid var(--border);border-radius:8px;margin-bottom:8px;overflow:hidden}
+.salud-empresa-head{display:flex;justify-content:space-between;align-items:center;padding:9px 10px;background:var(--surface2);gap:6px}
+.salud-empresa-nombre{font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;flex:1}
+.salud-empresa-expand:hover{text-decoration:underline}
+.salud-empresa-nav{cursor:pointer;font-size:13px;color:var(--accent);flex-shrink:0;padding:0 2px}
+.salud-empresa-nav:hover{opacity:.7}
+.salud-suc-clickable{cursor:pointer}
+.salud-suc-clickable:hover{background:var(--surface2)}
+.salud-empresa-sucs{padding:0 10px;max-height:0;overflow:hidden;transition:max-height .2s ease}
+.salud-empresa-sucs.open{padding:6px 10px;max-height:400px;overflow-y:auto}
+.salud-suc-row{display:flex;justify-content:space-between;align-items:center;gap:6px;padding:4px 0;font-size:11px;border-top:1px solid var(--border)}
+.salud-suc-row:first-child{border-top:none}
+.salud-suc-nombre{color:var(--text-sec);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.salud-badge{font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;color:#fff;white-space:nowrap;flex-shrink:0}
+.stats-modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:60;display:none;align-items:center;justify-content:center;padding:16px}
+.stats-modal-overlay.open{display:flex}
+.stats-modal-box{background:var(--surface);border-radius:12px;max-width:680px;width:100%;max-height:88vh;overflow-y:auto;padding:20px}
+.stats-modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
+.stats-modal-title{font-size:16px;font-weight:700;color:var(--text)}
+.stats-distribucion{display:flex;gap:10px;flex-wrap:wrap}
+.stats-stat-card{flex:1;min-width:110px;background:var(--surface2);border-radius:8px;padding:12px;text-align:center}
+.stats-stat-num{font-size:22px;font-weight:700}
+.stats-stat-label{font-size:11px;color:var(--text-muted);margin-top:2px}
 </style>
 </head>
 <body>
@@ -193,6 +235,43 @@ tbody tr:hover{background:var(--surface2)}
         <div id="metas-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px"></div>
       </div>
       <div id="obj-grid"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Panel de salud multi-empresa (agregado 2026-08-20) -->
+<button id="btn-salud-toggle" class="salud-toggle-btn" title="Salud de empresas">&#127973;</button>
+<div id="salud-overlay" class="salud-overlay"></div>
+<div id="salud-drawer" class="salud-drawer">
+  <div class="salud-drawer-header">
+    <span class="salud-drawer-title">Salud de empresas</span>
+    <div style="display:flex;gap:2px">
+      <button id="btn-salud-pin" class="salud-close-btn" title="Fijar panel (queda al lado del contenido, sin tapar nada)">&#128204;</button>
+      <button id="btn-salud-close" class="salud-close-btn">&times;</button>
+    </div>
+  </div>
+  <div class="salud-orden-toggle">
+    <button id="btn-orden-peor" class="salud-orden-btn active">Peor &rarr; Mejor</button>
+    <button id="btn-orden-mejor" class="salud-orden-btn">Mejor &rarr; Peor</button>
+  </div>
+  <button id="btn-salud-refresh" class="btn btn-ghost" style="width:100%">&#8635; Actualizar</button>
+  <div id="salud-list" class="salud-list"></div>
+  <button id="btn-salud-stats" class="btn btn-primary" style="width:100%;margin:12px 0 4px">&#128202; Ver an&aacute;lisis estad&iacute;stico</button>
+</div>
+
+<!-- Modal de analisis estadistico -->
+<div id="stats-modal" class="stats-modal-overlay">
+  <div class="stats-modal-box">
+    <div class="stats-modal-header">
+      <span class="stats-modal-title">An&aacute;lisis estad&iacute;stico &mdash; Salud de empresas</span>
+      <button id="btn-stats-close" class="salud-close-btn">&times;</button>
+    </div>
+    <div id="stats-distribucion" class="stats-distribucion"></div>
+    <div style="display:flex;gap:16px;margin-top:16px;flex-wrap:wrap">
+      <div class="chart-wrap" style="flex:1;min-width:220px;max-width:280px"><canvas id="stats-pie-chart"></canvas></div>
+      <div style="flex:2;min-width:280px;max-height:340px;overflow-y:auto;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px">
+        <div id="stats-chart-inner" style="position:relative;width:100%"><canvas id="stats-chart"></canvas></div>
+      </div>
     </div>
   </div>
 </div>
@@ -534,6 +613,210 @@ function metaDefaultEditable(suc) {
   return COPEC_METAS_DEFAULT[suc] || '';
 }
 
+// ============================================================
+// PANEL DE SALUD MULTI-EMPRESA (agregado 2026-08-20)
+// Calcula la salud de las sucursales de TODAS las empresas a la vez, leyendo
+// directo de sus Google Sheets (doGet) sin necesidad de subir un Excel.
+// IMPORTANTE: estas funciones NO tocan ningun estado global de la empresa
+// activa (valMatrix/sucursales/rawRows/metasFromSheets/acumFromSheets/etc.)
+// — reciben los datos crudos del doGet como parametro y devuelven resultados
+// locales, para poder calcular las 10 empresas en paralelo sin pisar lo que
+// esta viendo el usuario en pantalla.
+// ============================================================
+
+// Version standalone del parseo de "🎯 Objetivos" que ya usa
+// renderCopecObjetivos() en modo Sheets (ver mas abajo, se refactorizo para
+// reusar esta misma funcion ahi tambien y no duplicar la logica).
+function parseObjetivosRows_(objetivosRows) {
+  var objAnualBySuc = {}, objBySucMes = {};
+  (objetivosRows||[]).forEach(function(r) {
+    if (!r) return;
+    var suc2 = ((r['Sucursal']||r[1]||'')+'').trim();
+    var mes2 = (r['Mes']||r[2]||'')+'';
+    var obj2 = (r['Objetivo']||r[3]||'')+'';
+    if (!suc2 || !obj2) return;
+    var _cv = r['% cumplimiento']; var _c4 = r[4];
+    var estadoRaw = (_cv !== undefined && _cv !== null && _cv !== '' ? _cv : (_c4 !== undefined && _c4 !== null ? _c4 : ''))+'';
+    var estado = estadoRaw;
+    if (estadoRaw !== 'OK' && estadoRaw !== 'No') {
+      var cl = estadoRaw.replace('%','').replace(',','.').trim();
+      var n = parseFloat(cl);
+      if (!isNaN(n)) {
+        if (Number.isInteger(n) && n > 1) estado = n + ' retiro' + (n !== 1 ? 's' : '');
+        else estado = (n > 0 && n <= 1 ? n * 100 : n).toFixed(1).replace('.',',') + '%';
+      }
+    }
+    var detalle2 = (r['Detalle']||r[5]||'')+'';
+    if (mes2 === 'Anual') {
+      objAnualBySuc[suc2+'|'+obj2] = {suc:suc2, obj:obj2, estado:estado, detalle:detalle2};
+      return;
+    }
+    var mesKey = null;
+    Object.keys(MESES_ES).forEach(function(k){
+      if (MESES_ES[k] === mes2) mesKey = (r['Año']||new Date().getFullYear())+'-'+String(k).padStart(2,'0');
+    });
+    if (!mesKey) return;
+    objBySucMes[suc2+'|'+mesKey+'|'+obj2] = {suc:suc2, mesKey:mesKey, obj:obj2, estado:estado, detalle:detalle2};
+  });
+  return {objAnualBySuc:objAnualBySuc, objBySucMes:objBySucMes};
+}
+
+// Version standalone del parseo de "♻️ Valorización" que ya usa
+// loadSheetsData() (Meta % y % Acumulado por sucursal), sin tocar
+// metasFromSheets/acumFromSheets globales.
+function parseValorizacionRows_(valorizacionRows) {
+  var sucursalesSet = {}, metaFromSheet = {}, acumBySuc = {};
+  function parsePct(val) {
+    if (val === '' || val === null || val === undefined) return null;
+    var raw = (val+'').replace('%','').replace(',','.').trim();
+    var pct = parseFloat(raw);
+    if (isNaN(pct)) return null;
+    var hasPercent = (val+'').indexOf('%') >= 0;
+    if (!hasPercent && pct > 0 && pct < 1) pct = pct * 100;
+    else if (!hasPercent && pct === 1) pct = 100;
+    return pct;
+  }
+  (valorizacionRows||[]).forEach(function(row) {
+    if (!row) return;
+    var suc = (row['Sucursal']||row[1]||'')+'';
+    var tipo = (row['Tipo']||row[2]||'')+'';
+    if (!suc) return;
+    sucursalesSet[suc] = true;
+    if (tipo === 'Meta %') {
+      Object.keys(MESES_ES).some(function(k) {
+        var pct = parsePct(row[MESES_ES[k]]);
+        if (pct === null) return false;
+        metaFromSheet[suc] = pct;
+        return true;
+      });
+      return;
+    }
+    if (tipo === '% Acumulado') {
+      acumBySuc[suc] = acumBySuc[suc] || {};
+      Object.keys(MESES_ES).forEach(function(k) {
+        var pct = parsePct(row[MESES_ES[k]]);
+        if (pct === null) return;
+        var mesKey = (row['Año'] || new Date().getFullYear()) + '-' + String(k).padStart(2,'0');
+        acumBySuc[suc][mesKey] = pct;
+      });
+    }
+  });
+  return {sucursales:Object.keys(sucursalesSet), metaFromSheet:metaFromSheet, acumBySuc:acumBySuc};
+}
+
+// Ultimo % acumulado disponible (mes mas reciente) para una sucursal.
+function ultimoAcum_(acumBySuc, suc) {
+  var d = acumBySuc[suc];
+  if (!d) return null;
+  var keys = Object.keys(d).sort();
+  return keys.length ? d[keys[keys.length-1]] : null;
+}
+
+// Exclusion de sucursales para el panel de salud: la lista fija
+// (SUCURSALES_EXCLUIDAS) + las "sucursales cerradas" marcadas a mano desde
+// el boton "🏢 Sucursales cerradas" (localStorage, por empresa — se le pasa
+// companyId explicito en vez de depender de empresaActual, ya que el panel
+// de salud calcula las 10 empresas sin que sean necesariamente la activa).
+function isSucExcluidaParaSalud_(companyId, suc) {
+  if (SUCURSALES_EXCLUIDAS.some(function(e){ return suc.toLowerCase().indexOf(e.toLowerCase())>=0; })) return true;
+  return getSucursalesExcluidasUI(companyId).indexOf(suc) >= 0;
+}
+
+// Resuelve la meta de valorizacion por sucursal para una empresa arbitraria,
+// mismo orden de prioridad que ya usa renderCopecObjetivos() para la empresa
+// activa (fija en codigo > Sheet > localStorage), pero sin depender de
+// sucursales/metasFromSheets globales.
+function resolveMetaEmpresa_(companyId, sucursalesList, metaFromSheet) {
+  if (companyId === 'copec') {
+    var storedC = null;
+    try { var s = localStorage.getItem('copec_metas'); storedC = s ? JSON.parse(s) : null; } catch(e) { storedC = null; }
+    return Object.assign({}, COPEC_METAS_DEFAULT, metaFromSheet, storedC || {});
+  }
+  if (companyId === 'abastible') return ABASTIBLE_METAS;
+  if (companyId === 'ccu') return CCU_METAS;
+  if (companyId === 'pms') {
+    var mP = {}; sucursalesList.forEach(function(s){ mP[s] = PMS_META_PCT; }); return mP;
+  }
+  if (companyId === 'acciona') {
+    var defA = {}; sucursalesList.forEach(function(s){ defA[s] = ACCIONA_META_PCT_DEFAULT; });
+    var storedA = null;
+    try { var s2 = localStorage.getItem('acciona_metas'); storedA = s2 ? JSON.parse(s2) : null; } catch(e) { storedA = null; }
+    return Object.assign({}, defA, metaFromSheet, storedA || {});
+  }
+  // gespania/salfa/euro/ando/socovesa: solo lo que venga del Sheet, sin default fijo.
+  return metaFromSheet;
+}
+
+// Calcula la salud (0-100 + estado Acción/Atención/OK) de cada sucursal de
+// una empresa, a partir del payload crudo de su doGet — mismo criterio
+// exacto que el "% global" de renderCopecObjetivos(): promedio de todos los
+// objetivos de emp.objetivos (cada uno 1 unidad, mensual promedia sus meses
+// con dato primero) + el % de valorizacion vs meta como una unidad mas.
+function calcSaludEmpresa_(companyId, data) {
+  var emp = EMPRESAS[companyId];
+  var valInfo = parseValorizacionRows_(data.valorizacion);
+  var objInfo = parseObjetivosRows_(data.objetivos);
+  var metas = resolveMetaEmpresa_(companyId, valInfo.sucursales, valInfo.metaFromSheet);
+
+  var sucSet = {};
+  valInfo.sucursales.forEach(function(s){ sucSet[s] = true; });
+  (data.trazabilidad||[]).forEach(function(r){ var s=((r['Sucursal']||r[1]||'')+'').trim(); if(s) sucSet[s]=true; });
+  (data.objetivos||[]).forEach(function(r){ var s=((r['Sucursal']||r[1]||'')+'').trim(); if(s) sucSet[s]=true; });
+  var sucursalesList = Object.keys(sucSet).filter(function(s){ return !isSucExcluidaParaSalud_(companyId, s); });
+
+  return sucursalesList.map(function(suc){
+    var objScores = (emp.objetivos||[]).map(function(o){
+      if (OBJ_ANUALES[o.tipo]) {
+        var rAnu = objInfo.objAnualBySuc[suc+'|'+o.nombre];
+        return rAnu ? scoreObjSalud_(rAnu.estado, rAnu.detalle) : 0;
+      }
+      var valsMes = [];
+      var prefix = suc+'|';
+      Object.keys(objInfo.objBySucMes).forEach(function(k){
+        if (k.indexOf(prefix) !== 0) return;
+        if (k.slice(k.lastIndexOf('|')+1) !== o.nombre) return;
+        var rMes = objInfo.objBySucMes[k];
+        if (rMes.estado || rMes.detalle) valsMes.push(scoreObjSalud_(rMes.estado, rMes.detalle));
+      });
+      return valsMes.length ? (valsMes.reduce(function(s,v){return s+v;},0)/valsMes.length) : 0;
+    });
+    var meta = metas[suc] !== undefined ? metas[suc] : null;
+    var acum = ultimoAcum_(valInfo.acumBySuc, suc);
+    if (meta !== null && meta > 0 && acum !== null) objScores.push(Math.min(100, acum/meta*100));
+    var pct = objScores.length ? objScores.reduce(function(s,v){return s+v;},0)/objScores.length : 0;
+    var estado = pct>=75?'OK':pct>=50?'Atención':'Acción';
+    return {suc:suc, pct:pct, estado:estado};
+  });
+}
+
+// Estado global del panel: companyId -> array de {suc,pct,estado}, o 'error'
+// si fallo la carga de esa empresa. Se llena una vez al abrir la app
+// (cargarSaludTodas) y se puede refrescar a mano.
+var saludPorEmpresa = {};
+var saludCargando = false;
+var saludOrden = 'peor'; // 'peor' (peor a mejor) o 'mejor' (mejor a peor) — default: mostrar primero las que necesitan atencion
+
+function cargarSaludTodas() {
+  saludCargando = true;
+  renderSaludPanel();
+  var ids = Object.keys(EMPRESAS);
+  return Promise.all(ids.map(function(id){
+    return fetch(EMPRESAS[id].scriptUrl, {method:'GET', mode:'cors'})
+      .then(function(r){ return r.json(); })
+      .then(function(data){
+        data = data || {};
+        saludPorEmpresa[id] = calcSaludEmpresa_(id, data);
+      })
+      .catch(function(err){
+        saludPorEmpresa[id] = 'error';
+        console.error('Salud '+id+':', err);
+      });
+  })).then(function(){
+    saludCargando = false;
+    renderSaludPanel();
+  });
+}
+
 // Normalización de nombres de sucursal
 var SUC_ALIAS = {
   'Olimpia III': 'Olimpia III - Socovesa Sur'
@@ -565,11 +848,11 @@ var SUCURSALES_EXCLUIDAS = ['Edificio Eliodoro Yañez','Edificio Eliodoro Yanez'
 // (guardadas en localStorage, por empresa, ya que un mismo nombre de sucursal podria
 // repetirse entre empresas distintas). Se suman a SUCURSALES_EXCLUIDAS (que sigue
 // existiendo para casos ya conocidos que no requieren edicion desde la UI).
-function getSucursalesExcluidasUI() {
+function getSucursalesExcluidasUI(companyId) {
   try {
     var raw = localStorage.getItem('sucursales_excluidas');
     var all = raw ? JSON.parse(raw) : {};
-    return all[empresaActual] || [];
+    return all[companyId || empresaActual] || [];
   } catch(e) { return []; }
 }
 function setSucursalesExcluidasUI(lista) {
@@ -1735,7 +2018,7 @@ function loadFromSheets() {
   msg.textContent = 'Cargando datos desde Google Sheets...';
   document.getElementById('btn-load-sheets').disabled = true;
 
-  fetch(emp.scriptUrl, {method:'GET', mode:'cors'})
+  return fetch(emp.scriptUrl, {method:'GET', mode:'cors'})
     .then(function(r){ return r.json(); })
     .then(function(data) {
       if (empresaActual !== empresaAlIniciar) return; // la empresa activa cambió mientras cargaba
@@ -2134,37 +2417,14 @@ function renderCopecObjetivos() {
     else objBySucMes[r.suc + '|' + r.mesKey + '|' + r.obj] = r;
   });
 
-  // Si no hay Excel, usar datos del Sheet
+  // Si no hay Excel, usar datos del Sheet (misma logica de parseo que usa
+  // el panel de salud multi-empresa para las demas empresas, ver
+  // parseObjetivosRows_ mas arriba — refactorizado 2026-08-20 para no
+  // duplicar la logica en 2 lugares).
   if (rawRows.length === 0 && sheetsObjetivosData) {
-    sheetsObjetivosData.forEach(function(r) {
-      if (!r) return;
-      var suc2 = ((r['Sucursal']||r[1]||'')+'').trim();
-      var mes2 = (r['Mes']||r[2]||'')+'';
-      var obj2 = (r['Objetivo']||r[3]||'')+'';
-      if (!suc2 || !obj2) return;
-      var _cv = r['% cumplimiento']; var _c4 = r[4];
-      var estadoRaw = (_cv !== undefined && _cv !== null && _cv !== '' ? _cv : (_c4 !== undefined && _c4 !== null ? _c4 : ''))+'';
-      var estado = estadoRaw;
-      if (estadoRaw !== 'OK' && estadoRaw !== 'No') {
-        var cl = estadoRaw.replace('%','').replace(',','.').trim();
-        var n = parseFloat(cl);
-        if (!isNaN(n)) {
-          if (Number.isInteger(n) && n > 1) estado = n + ' retiro' + (n !== 1 ? 's' : '');
-          else estado = (n > 0 && n <= 1 ? n * 100 : n).toFixed(1).replace('.',',') + '%';
-        }
-      }
-      var detalle2 = (r['Detalle']||r[5]||'')+'';
-      if (mes2 === 'Anual') {
-        objAnualBySuc[suc2+'|'+obj2] = {suc:suc2, obj:obj2, estado:estado, detalle:detalle2};
-        return;
-      }
-      var mesKey = null;
-      Object.keys(MESES_ES).forEach(function(k){
-        if (MESES_ES[k] === mes2) mesKey = (r['Año']||new Date().getFullYear())+'-'+String(k).padStart(2,'0');
-      });
-      if (!mesKey) return;
-      objBySucMes[suc2+'|'+mesKey+'|'+obj2] = {suc:suc2, mesKey:mesKey, obj:obj2, estado:estado, detalle:detalle2};
-    });
+    var parsedObj = parseObjetivosRows_(sheetsObjetivosData);
+    Object.assign(objAnualBySuc, parsedObj.objAnualBySuc);
+    Object.assign(objBySucMes, parsedObj.objBySucMes);
   }
 
   var objetivosAnuales = (emp.objetivos || []).filter(function(o){ return OBJ_ANUALES[o.tipo]; });
@@ -2208,7 +2468,7 @@ function renderCopecObjetivos() {
     // se quitaron de la UI). Solo se agrega si la sucursal tiene meta
     // definida; si no, no aporta ni resta unidades al promedio. Mismo
     // criterio para las 10 empresas.
-    if (meta !== null && acum !== null) objScoresAll.push(Math.min(100, acum/meta*100));
+    if (meta !== null && meta > 0 && acum !== null) objScoresAll.push(Math.min(100, acum/meta*100));
     var pctGlobal = objScoresAll.length ? objScoresAll.reduce(function(s,v){return s+v;},0)/objScoresAll.length : 0;
     // 3 estados de salud (agregado 2026-08-20, a pedido del usuario):
     // 0-49% Acción (rojo), 50-74% Atención (amarillo), 75-100% OK (verde).
@@ -2552,10 +2812,276 @@ function sync(tipo) {
 
 
 
+// ============================================================
+// UI del panel de salud multi-empresa + modal de analisis estadistico
+// (agregado 2026-08-20)
+// ============================================================
+
+function renderSaludPanel() {
+  var list = document.getElementById('salud-list');
+  if (!list) return;
+  if (saludCargando) {
+    list.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-muted);font-size:12px">Cargando salud de las empresas&hellip;</div>';
+    return;
+  }
+  var ids = Object.keys(EMPRESAS);
+  var filas = ids.map(function(id){
+    var sucs = saludPorEmpresa[id];
+    if (!sucs || sucs === 'error') {
+      return {id:id, nombre:EMPRESAS[id].nombre, sucs:[], avg:null, error: sucs === 'error'};
+    }
+    var avg = sucs.length ? sucs.reduce(function(s,r){return s+r.pct;},0)/sucs.length : null;
+    return {id:id, nombre:EMPRESAS[id].nombre, sucs:sucs, avg:avg, error:false};
+  });
+  filas.sort(function(a,b){
+    var av = a.avg===null ? -1 : a.avg;
+    var bv = b.avg===null ? -1 : b.avg;
+    return saludOrden === 'peor' ? av-bv : bv-av;
+  });
+  list.innerHTML = filas.map(function(f){
+    var sucsSorted = f.sucs.slice().sort(function(a,b){
+      return saludOrden === 'peor' ? a.pct-b.pct : b.pct-a.pct;
+    });
+    var colorAvg = f.avg===null ? 'var(--text-muted)' : (f.avg>=75?'var(--green)':f.avg>=50?'var(--yellow)':'var(--red)');
+    var labelAvg = f.error ? 'Error' : (f.avg===null ? 'Sin datos' : Math.round(f.avg)+'%');
+    var sucsHtml = sucsSorted.map(function(s){
+      var c = s.estado==='OK'?'var(--green)':s.estado==='Atención'?'var(--yellow)':'var(--red)';
+      var sucAttr = s.suc.replace(/"/g,'&quot;');
+      return '<div class="salud-suc-row salud-suc-clickable" data-id="'+f.id+'" data-suc="'+sucAttr+'" title="Ver objetivos de '+sucAttr+'">'
+        + '<span class="salud-suc-nombre">'+s.suc+'</span>'
+        + '<span class="salud-badge" style="background:'+c+'">'+s.estado+' '+Math.round(s.pct)+'%</span></div>';
+    }).join('');
+    return '<div class="salud-empresa-row">'
+      + '<div class="salud-empresa-head">'
+      +   '<span class="salud-empresa-nombre salud-empresa-expand" data-id="'+f.id+'">'+f.nombre+'</span>'
+      +   '<span class="salud-empresa-nav" data-id="'+f.id+'" title="Ver objetivos de '+f.nombre+'">&#8599;</span>'
+      +   '<span class="salud-badge" style="background:'+colorAvg+'">'+labelAvg+'</span>'
+      + '</div>'
+      + '<div class="salud-empresa-sucs" id="salud-sucs-'+f.id+'">'
+      +   (sucsHtml || '<div style="font-size:11px;color:var(--text-muted);padding:6px 0">Sin sucursales</div>')
+      + '</div>'
+      + '</div>';
+  }).join('');
+  Array.prototype.forEach.call(list.querySelectorAll('.salud-empresa-expand'), function(el){
+    el.addEventListener('click', function(){
+      var id = el.getAttribute('data-id');
+      var panel = document.getElementById('salud-sucs-'+id);
+      if (panel) panel.classList.toggle('open');
+    });
+  });
+  Array.prototype.forEach.call(list.querySelectorAll('.salud-empresa-nav'), function(el){
+    el.addEventListener('click', function(ev){
+      ev.stopPropagation();
+      irASaludDestino(el.getAttribute('data-id'), null);
+    });
+  });
+  Array.prototype.forEach.call(list.querySelectorAll('.salud-suc-clickable'), function(row){
+    row.addEventListener('click', function(){
+      irASaludDestino(row.getAttribute('data-id'), row.getAttribute('data-suc'));
+    });
+  });
+}
+
+// Navega a la pestaña Objetivos de la empresa (y sucursal, si se indica)
+// elegida desde el panel de salud — mismo mecanismo que usar el selector de
+// empresa + la pestaña Objetivos a mano.
+function irASaludDestino(companyId, sucursal) {
+  if (!saludPinned) cerrarSaludDrawer();
+  document.getElementById('stats-modal').classList.remove('open');
+  empresaActual = companyId;
+  document.querySelectorAll('.empresa-pill').forEach(function(p){
+    p.classList.toggle('active', p.textContent === EMPRESAS[companyId].nombre);
+  });
+  resetData();
+  document.querySelectorAll('.tab').forEach(function(b){ b.classList.remove('active'); });
+  document.querySelectorAll('.section').forEach(function(s){ s.classList.remove('active'); });
+  var tabObjBtn = document.querySelector('.tab[data-tab="obj"]');
+  if (tabObjBtn) tabObjBtn.classList.add('active');
+  var tabObjSection = document.getElementById('tab-obj');
+  if (tabObjSection) tabObjSection.classList.add('active');
+  loadFromSheets().then(function(){
+    if (!sucursal) return;
+    var sel = document.getElementById('f-obj-suc');
+    if (!sel) return;
+    var found = Array.prototype.some.call(sel.options, function(o){ return o.value === sucursal; });
+    if (found) { sel.value = sucursal; renderCopecObjetivos(); }
+  });
+}
+
+// "Fijar" (agregado 2026-08-20, a pedido del usuario): con el panel abierto
+// normal (no fijado), un overlay oscuro tapa el resto de la pantalla — asi
+// que no se puede ver el ranking Y el contenido principal al mismo tiempo.
+// Fijado: el panel queda abierto permanentemente al lado del contenido (sin
+// overlay, el contenido se corre a la derecha via .app-con-salud), y la
+// preferencia se guarda en localStorage para que persista entre sesiones.
+var saludPinned = false;
+try { saludPinned = localStorage.getItem('salud_pinned') === '1'; } catch(e) { saludPinned = false; }
+
+function aplicarModoSaludDrawer() {
+  var app = document.querySelector('.app');
+  var overlay = document.getElementById('salud-overlay');
+  var pinBtn = document.getElementById('btn-salud-pin');
+  var isOpen = document.getElementById('salud-drawer').classList.contains('open');
+  if (pinBtn) pinBtn.classList.toggle('active', saludPinned);
+  if (saludPinned) {
+    if (app) app.classList.add('app-con-salud');
+    if (overlay) overlay.classList.remove('open');
+  } else {
+    if (app) app.classList.remove('app-con-salud');
+    if (overlay) overlay.classList.toggle('open', isOpen);
+  }
+}
+
+function abrirSaludDrawer() {
+  document.getElementById('salud-drawer').classList.add('open');
+  aplicarModoSaludDrawer();
+}
+function cerrarSaludDrawer() {
+  document.getElementById('salud-drawer').classList.remove('open');
+  document.getElementById('salud-overlay').classList.remove('open');
+  if (saludPinned) {
+    saludPinned = false;
+    try { localStorage.setItem('salud_pinned', '0'); } catch(e) {}
+  }
+  var app = document.querySelector('.app');
+  if (app) app.classList.remove('app-con-salud');
+  var pinBtn = document.getElementById('btn-salud-pin');
+  if (pinBtn) pinBtn.classList.remove('active');
+}
+
+var statsChartInst = null;
+var statsPieChartInst = null;
+function abrirStatsModal() {
+  var modal = document.getElementById('stats-modal');
+  modal.classList.add('open');
+
+  var ids = Object.keys(EMPRESAS);
+  var counts = {'Acción':0,'Atención':0,'OK':0};
+  var totalSucs = 0;
+  var empresaLabels = [], empresaAvgs = [], empresaColors = [];
+  ids.forEach(function(id){
+    var sucs = saludPorEmpresa[id];
+    if (!sucs || sucs === 'error') return;
+    sucs.forEach(function(s){ counts[s.estado] = (counts[s.estado]||0)+1; totalSucs++; });
+    var avg = sucs.length ? sucs.reduce(function(s,r){return s+r.pct;},0)/sucs.length : 0;
+    empresaLabels.push(EMPRESAS[id].nombre);
+    empresaAvgs.push(Math.round(avg));
+    empresaColors.push(avg>=75?'#0ca30c':avg>=50?'#d4900a':'#dc2626');
+  });
+
+  function pctOf(n){ return totalSucs>0 ? Math.round(n/totalSucs*100) : 0; }
+  document.getElementById('stats-distribucion').innerHTML =
+      '<div class="stats-stat-card"><div class="stats-stat-num" style="color:var(--red)">'+counts['Acción']+'</div><div class="stats-stat-label">Acción ('+pctOf(counts['Acción'])+'%)</div></div>'
+    + '<div class="stats-stat-card"><div class="stats-stat-num" style="color:var(--yellow)">'+counts['Atención']+'</div><div class="stats-stat-label">Atención ('+pctOf(counts['Atención'])+'%)</div></div>'
+    + '<div class="stats-stat-card"><div class="stats-stat-num" style="color:var(--green)">'+counts['OK']+'</div><div class="stats-stat-label">OK ('+pctOf(counts['OK'])+'%)</div></div>'
+    + '<div class="stats-stat-card"><div class="stats-stat-num">'+totalSucs+'</div><div class="stats-stat-label">Sucursales totales</div></div>';
+
+  if (statsPieChartInst) { statsPieChartInst.destroy(); statsPieChartInst = null; }
+  statsPieChartInst = new Chart(document.getElementById('stats-pie-chart'), {
+    type: 'pie',
+    data: {
+      labels: ['Acción ('+counts['Acción']+')', 'Atención ('+counts['Atención']+')', 'OK ('+counts['OK']+')'],
+      datasets: [{
+        data: [counts['Acción'], counts['Atención'], counts['OK']],
+        backgroundColor: ['#dc2626', '#d4900a', '#0ca30c']
+      }]
+    },
+    options: {
+      plugins: {
+        legend: { position: 'bottom' },
+        tooltip: { callbacks: { label: function(ctx){
+          var total = ctx.dataset.data.reduce(function(a,b){return a+b;},0);
+          var pct = total>0 ? Math.round(ctx.parsed/total*100) : 0;
+          return ctx.label + ': ' + ctx.parsed + ' (' + pct + '%)';
+        } } }
+      }
+    },
+    // Plugin inline (sin libreria externa) que dibuja el % dentro de cada
+    // porcion de la torta, agregado a pedido del usuario.
+    plugins: [{
+      id: 'pctEnPorciones',
+      afterDatasetsDraw: function(chart) {
+        var meta = chart.getDatasetMeta(0);
+        var data = chart.data.datasets[0].data;
+        var total = data.reduce(function(a,b){return a+b;},0);
+        if (total <= 0) return;
+        var ctx = chart.ctx;
+        ctx.save();
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 13px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        meta.data.forEach(function(arc, i){
+          if (!data[i]) return;
+          var pct = Math.round(data[i]/total*100);
+          var pos = arc.tooltipPosition();
+          ctx.fillText(pct+'%', pos.x, pos.y);
+        });
+        ctx.restore();
+      }
+    }]
+  });
+
+  if (statsChartInst) { statsChartInst.destroy(); statsChartInst = null; }
+  // Ordenar de peor a mejor para que el grafico se lea de arriba (peor) a abajo (mejor)
+  var order = empresaLabels.map(function(_,i){ return i; }).sort(function(a,b){ return empresaAvgs[a]-empresaAvgs[b]; });
+  // Alto dinamico segun cantidad de empresas para que ninguna etiqueta se
+  // salte por falta de espacio (Chart.js hace autoSkip en el eje de
+  // categorias cuando el contenedor es muy chico para todas las barras).
+  document.getElementById('stats-chart-inner').style.height = Math.max(300, order.length*34) + 'px';
+  statsChartInst = new Chart(document.getElementById('stats-chart'), {
+    type: 'bar',
+    data: {
+      labels: order.map(function(i){ return empresaLabels[i]; }),
+      datasets: [{
+        label: 'Salud promedio (%)',
+        data: order.map(function(i){ return empresaAvgs[i]; }),
+        backgroundColor: order.map(function(i){ return empresaColors[i]; })
+      }]
+    },
+    options: {
+      indexAxis: 'y',
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: { x: { min: 0, max: 100 }, y: { ticks: { autoSkip: false } } }
+    }
+  });
+}
+
+document.getElementById('btn-salud-toggle').addEventListener('click', abrirSaludDrawer);
+document.getElementById('btn-salud-close').addEventListener('click', cerrarSaludDrawer);
+document.getElementById('salud-overlay').addEventListener('click', cerrarSaludDrawer);
+document.getElementById('btn-salud-pin').addEventListener('click', function(){
+  saludPinned = !saludPinned;
+  try { localStorage.setItem('salud_pinned', saludPinned ? '1' : '0'); } catch(e) {}
+  aplicarModoSaludDrawer();
+});
+document.getElementById('btn-orden-peor').addEventListener('click', function(){
+  saludOrden = 'peor';
+  document.getElementById('btn-orden-peor').classList.add('active');
+  document.getElementById('btn-orden-mejor').classList.remove('active');
+  renderSaludPanel();
+});
+document.getElementById('btn-orden-mejor').addEventListener('click', function(){
+  saludOrden = 'mejor';
+  document.getElementById('btn-orden-mejor').classList.add('active');
+  document.getElementById('btn-orden-peor').classList.remove('active');
+  renderSaludPanel();
+});
+document.getElementById('btn-salud-refresh').addEventListener('click', function(){
+  cargarSaludTodas();
+});
+document.getElementById('btn-salud-stats').addEventListener('click', abrirStatsModal);
+document.getElementById('btn-stats-close').addEventListener('click', function(){
+  document.getElementById('stats-modal').classList.remove('open');
+});
+
 document.addEventListener('DOMContentLoaded',function(){
   initEmpresaPills();
   renderTrazHeaders();
   loadFromSheets();
+  cargarSaludTodas();
+  if (saludPinned) abrirSaludDrawer();
 });
 </script>
 </body>
