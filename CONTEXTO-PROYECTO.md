@@ -1316,6 +1316,38 @@ en vez de un encabezado con un mes-año distinto por columna:
       se vean razonables con datos reales — son cálculos nuevos, sin verificar contra el
       Excel real de Acciona todavía.
 
+## Edicion de objetivos manuales desde el visor (agregado 2026-08-21)
+A pedido del usuario: poder editar el % cumplimiento/Estado y Detalle de un objetivo manual
+directamente desde la tabla de Objetivos, en vez de tener que entrar a la hoja `🎯 Objetivos`
+del Sheet y escribirlo a mano. El cambio se sincroniza al Sheet al instante.
+
+- **Que objetivos son editables**: `esObjetivoManualEditable(o)` — todos los `manual_anual`
+  (FGR de Gespania/Socovesa, Residuos Spot de CCU, sensibilizacion de Ando, CES de Acciona,
+  Contactar Nuevos proveedores de Euro), mas `costo` de Euro (`manual`, "Costo/Presupuesto").
+  Excluye a proposito `fgr`/`co2` de Euro: son tipo `manual` pero `calcObjetivos()` los
+  autocalcula desde "% de avance" — editarlos a mano se pisaria en el proximo calculo/sync.
+- **UI**: la celda de un objetivo editable (en la tabla "Analisis anual" o, para Euro
+  "Costo/Presupuesto", en la tabla mensual) es clickeable (`celdaObjetivoManual()`, clase
+  `.obj-cell-editable`, listener delegado en `#obj-grid`) y abre el modal "Editar objetivo
+  manual" con el Estado/Detalle actuales precargados. "Guardar" sincroniza; "Vaciar" limpia
+  los campos antes de guardar (para borrar el valor); "Cancelar" cierra sin tocar nada.
+- **Sync al Sheet**: mismo payload que usa el sync automatico al subir un Excel
+  (`{tipo:'objetivos', filas:[[...]]}`, `fetch(..., {mode:'no-cors'})`), una sola fila. Euro
+  lleva 7 columnas (`id, sucursal, mes, año, objetivo, estado, detalle` — año vacio si es la
+  fila "Anual"); el resto de empresas lleva 6 (`id, sucursal, mes, objetivo, estado, detalle`).
+  `writeObjetivos()` en el Apps Script ya reemplaza solo la fila con esa combinacion exacta de
+  empresa_id+mes+Objetivo (fix previo del 2026-08-14), asi que no duplica ni borra otras filas.
+- **Persistencia en sesion**: `manualEditsCache` (companyId -> `{anual:{}, mensual:{}}`,
+  mismas claves que `objAnualBySuc`/`objBySucMes`) se mergea encima del resultado de
+  `calcObjetivos()`/Sheets en cada `renderCopecObjetivos()`. Es necesario porque, si hay un
+  Excel cargado en la sesion, `calcObjetivos()` nunca genera fila para un objetivo manual —
+  sin este cache la edicion desaparecería del visor al re-renderizar aunque ya haya quedado
+  bien guardada en el Sheet. Al recargar la pagina, se vuelve a leer desde el Sheet
+  directamente (ya con el valor sincronizado), asi que no hace falta persistir en localStorage.
+- Verificado en vivo (interceptando `fetch` para no escribir de prueba en las Sheets reales de
+  Euro/Acciona): formato de fila correcto en ambos casos (7 y 6 columnas), el visor se
+  actualiza al instante tras guardar, y "Vaciar" limpia los campos correctamente.
+
 ## Objetivos "dormidos" por sucursal (agregado 2026-08-21)
 A pedido del usuario: opción para activar/desactivar (dormir) el seguimiento de un objetivo
 específico en una sucursal puntual (ej. una sucursal que no genera cierto tipo de residuo y

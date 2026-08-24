@@ -61,6 +61,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .filters label{font-size:12px;color:var(--text-sec)}
 .filters select{font-size:13px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);color:var(--text)}
 .chart-wrap{position:relative;width:100%;height:300px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:20px}
+.obj-cell-editable:hover{background:var(--surface2)}
 .table-wrap{background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden;overflow-x:auto}
 table{width:100%;border-collapse:collapse;font-size:13px}
 thead th{background:var(--surface2);padding:10px 12px;text-align:left;font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--border);white-space:nowrap}
@@ -285,6 +286,28 @@ tbody tr:hover{background:var(--surface2)}
       <div class="chart-wrap" style="flex:1;min-width:220px;max-width:280px"><canvas id="stats-pie-chart"></canvas></div>
       <div style="flex:2;min-width:280px;max-height:340px;overflow-y:auto;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px">
         <div id="stats-chart-inner" style="position:relative;width:100%"><canvas id="stats-chart"></canvas></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal para editar un objetivo manual desde el visor (se sincroniza al Sheet) -->
+<div id="manual-obj-modal" class="stats-modal-overlay">
+  <div class="stats-modal-box" style="max-width:420px">
+    <div class="stats-modal-header">
+      <span class="stats-modal-title">Editar objetivo manual</span>
+      <button id="btn-manual-obj-close" class="salud-close-btn">&times;</button>
+    </div>
+    <div id="manual-obj-info" style="font-size:12px;color:var(--text-muted);margin-bottom:14px;line-height:1.5"></div>
+    <label style="font-size:12px;font-weight:600;color:var(--text-sec);display:block;margin-bottom:4px">% cumplimiento / Estado</label>
+    <input type="text" id="manual-obj-estado" placeholder="ej. OK, No, 80%" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius);font-size:13px;margin-bottom:12px">
+    <label style="font-size:12px;font-weight:600;color:var(--text-sec);display:block;margin-bottom:4px">Detalle (opcional)</label>
+    <textarea id="manual-obj-detalle" rows="3" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius);font-size:13px;margin-bottom:14px;resize:vertical;font-family:inherit"></textarea>
+    <div style="display:flex;justify-content:space-between;gap:8px">
+      <button class="btn btn-ghost" id="btn-manual-obj-vaciar">Vaciar</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-ghost" id="btn-manual-obj-cancelar">Cancelar</button>
+        <button class="btn btn-primary" id="btn-manual-obj-guardar">Guardar</button>
       </div>
     </div>
   </div>
@@ -845,6 +868,13 @@ var SUC_ALIAS = {
 
 var empresaActual = 'copec';
 var valMatrix = {}, trazRows = [], sucursales = [], mesesDisp = [], rawRows = [], totalResiduosRows = [], costoIngresoRows = [];
+// Ediciones de objetivos manuales hechas desde el visor en esta sesion (ver
+// "Editar objetivo manual"): companyId -> {anual:{suc|obj:{estado,detalle}},
+// mensual:{suc|mesKey|obj:{estado,detalle}}}. Se mergean sobre el resultado
+// de calcObjetivos()/Sheets en renderCopecObjetivos() para que la edicion
+// persista mientras dure la sesion (ya quedo sincronizada al Sheet, asi que
+// al recargar la pagina se vuelve a leer desde ahi).
+var manualEditsCache = {};
 var chartInst = null;
 var sheetsObjetivosData = null;
 
@@ -1950,6 +1980,42 @@ function estadoCell(estado, detalle) {
 function celdaDormida() {
   return '<td style="padding:9px 12px;text-align:center;border-left:1px solid var(--border);color:var(--text-muted);font-style:italic;font-size:11px">&#128564; Dormido</td>';
 }
+
+// Objetivos cuyo % cumplimiento se ingresa a mano (nunca se calcula desde el
+// Excel) y por lo tanto tienen sentido editar directamente desde el visor.
+// Excluye fgr/co2 de Euro: aunque son tipo 'manual', calcObjetivos() los
+// autocompleta desde "% de avance" — editarlos a mano se perderia en el
+// proximo calculo/sync.
+function esObjetivoManualEditable(o) {
+  if (o.tipo === 'manual_anual') return true;
+  if (o.tipo === 'manual' && !(empresaActual === 'euro' && (o.id === 'fgr' || o.id === 'co2'))) return true;
+  return false;
+}
+
+// Celda editable para un objetivo manual: igual aspecto que estadoCell, pero
+// clickeable (delegado via .obj-cell-editable, ver listener de #obj-grid) y
+// con los datos necesarios para abrir el modal de edicion.
+function celdaObjetivoManual(suc, mesLabel, mesKey, anio, objNombre, estado, detalle) {
+  var esc = function(s){ return (s||'').replace(/"/g,'&quot;'); };
+  var attrs = ' class="obj-cell-editable" style="padding:9px 12px;border-left:1px solid var(--border);vertical-align:top;cursor:pointer"'
+    + ' data-suc="'+esc(suc)+'" data-mes="'+esc(mesLabel)+'" data-meskey="'+mesKey+'" data-anio="'+esc(anio)+'"'
+    + ' data-obj="'+esc(objNombre)+'" data-estado="'+esc(estado)+'" data-detalle="'+esc(detalle)+'" title="Click para editar">';
+  if (!estado && !detalle) {
+    return '<td'+attrs+'<span style="color:var(--text-muted);font-size:11px">&#9998; -- </span></td>';
+  }
+  var color = estado ? objColor(estado) : 'var(--text-muted)';
+  var pctN = estado ? parseFloat((estado+'').replace(',','.').replace('%','')) : NaN;
+  var hasBar = !isNaN(pctN) && estado!=='OK' && estado!=='No' && (estado+'').indexOf('retiro')<0;
+  var bar = hasBar
+    ? '<div style="margin-top:4px;background:var(--surface2);border-radius:3px;height:4px;overflow:hidden"><div style="width:'+Math.min(100,pctN).toFixed(0)+'%;height:4px;background:'+color+';border-radius:3px"></div></div>'
+    : '';
+  return '<td'+attrs
+    +(estado?'<span style="font-weight:700;color:'+color+'">'+estado+'</span>':'')
+    +bar
+    +(detalle?'<div style="font-size:10px;color:var(--text-muted);margin-top:3px;white-space:normal;line-height:1.6">'+detalle+'</div>':'')
+    +'<div style="font-size:9px;color:var(--text-muted);opacity:.7;margin-top:2px">&#9998; editar</div>'
+    +'</td>';
+}
 function isObjCumplido(estado){
   if(estado==='OK')return true;
   if(estado==='No')return false;
@@ -2479,6 +2545,16 @@ function renderCopecObjetivos() {
     Object.assign(objBySucMes, parsedObj.objBySucMes);
   }
 
+  // Ediciones manuales hechas desde el visor en esta sesion (ver
+  // "Editar objetivo manual") siempre ganan por sobre lo anterior — si hay
+  // Excel cargado, calcObjetivos() nunca genera fila para un objetivo
+  // manual, asi que sin este merge la edicion desaparecería al re-renderizar.
+  var editsForEmp = manualEditsCache[empresaActual];
+  if (editsForEmp) {
+    Object.assign(objAnualBySuc, editsForEmp.anual);
+    Object.assign(objBySucMes, editsForEmp.mensual);
+  }
+
   var objetivosAnuales = (emp.objetivos || []).filter(function(o){ return OBJ_ANUALES[o.tipo]; });
 
   var thBase='background:var(--surface2);padding:8px 12px;font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--border);white-space:nowrap;';
@@ -2566,8 +2642,9 @@ function renderCopecObjetivos() {
         var tr=document.createElement('tr');
         if (i>0) tr.style.borderTop='1px solid var(--border)';
         var cells='<td style="padding:9px 12px;font-weight:500;color:var(--text);border-right:1px solid var(--border)">'+o.nombre+'</td>';
-        cells += dormido ? celdaDormida()
-          : (r ? estadoCell(r.estado, r.detalle) : '<td style="padding:9px 12px;text-align:center;border-left:1px solid var(--border);color:var(--text-muted)">--</td>');
+        if (dormido) cells += celdaDormida();
+        else if (esObjetivoManualEditable(o)) cells += celdaObjetivoManual(suc, 'Anual', 'anual', '', o.nombre, r?r.estado:'', r?r.detalle:'');
+        else cells += r ? estadoCell(r.estado, r.detalle) : '<td style="padding:9px 12px;text-align:center;border-left:1px solid var(--border);color:var(--text-muted)">--</td>';
         tr.innerHTML=cells;
         anualBody.appendChild(tr);
       });
@@ -2714,9 +2791,15 @@ function renderCopecObjetivos() {
       trMan.style.borderTop='1px solid var(--border)';
       var manCells='<td style="padding:9px 12px;font-weight:500;color:var(--text);border-right:1px solid var(--border)">'+objManual.nombre+'</td>';
       var manDormido = isObjetivoDormido(empresaActual, suc, objManual.nombre);
+      var manEditable = esObjetivoManualEditable(objManual);
       mesesToShow.forEach(function(m){
         if(manDormido){manCells+=celdaDormida();return;}
         var r = objBySucMes[suc+'|'+m+'|'+objManual.nombre];
+        if (manEditable) {
+          var mesLabel = MES_L[parseInt(m.slice(5))-1];
+          manCells += celdaObjetivoManual(suc, mesLabel, m, m.slice(0,4), objManual.nombre, r?r.estado:'', r?r.detalle:'');
+          return;
+        }
         if(!r){manCells+='<td style="padding:9px 12px;text-align:center;border-left:1px solid var(--border);color:var(--text-muted)">--</td>';return;}
         manCells += estadoCell(r.estado, r.detalle);
       });
@@ -2858,6 +2941,65 @@ document.getElementById('btn-guardar-objetivos-suc').addEventListener('click', f
   renderCopecObjetivos();
   toast('Objetivos dormidos guardados');
 });
+
+// Edicion de objetivos manuales desde el visor (ver celdaObjetivoManual):
+// clic en cualquier celda ".obj-cell-editable" abre este modal con el
+// estado/detalle actuales; "Guardar" sincroniza al Sheet igual formato de
+// fila que usa el sync automatico al subir un Excel (tipo:'objetivos').
+var manualObjEditContext = null;
+document.getElementById('obj-grid').addEventListener('click', function(ev){
+  var cell = ev.target.closest ? ev.target.closest('.obj-cell-editable') : null;
+  if (!cell) return;
+  manualObjEditContext = {
+    suc: cell.getAttribute('data-suc'),
+    mes: cell.getAttribute('data-mes'),
+    mesKey: cell.getAttribute('data-meskey'),
+    anio: cell.getAttribute('data-anio'),
+    objNombre: cell.getAttribute('data-obj')
+  };
+  document.getElementById('manual-obj-info').innerHTML =
+    '<b>'+manualObjEditContext.objNombre+'</b><br>'+manualObjEditContext.suc+' &middot; '+manualObjEditContext.mes;
+  document.getElementById('manual-obj-estado').value = cell.getAttribute('data-estado') || '';
+  document.getElementById('manual-obj-detalle').value = cell.getAttribute('data-detalle') || '';
+  document.getElementById('manual-obj-modal').classList.add('open');
+});
+function cerrarManualObjModal() {
+  document.getElementById('manual-obj-modal').classList.remove('open');
+  manualObjEditContext = null;
+}
+document.getElementById('btn-manual-obj-close').addEventListener('click', cerrarManualObjModal);
+document.getElementById('btn-manual-obj-cancelar').addEventListener('click', cerrarManualObjModal);
+document.getElementById('btn-manual-obj-vaciar').addEventListener('click', function(){
+  document.getElementById('manual-obj-estado').value = '';
+  document.getElementById('manual-obj-detalle').value = '';
+});
+document.getElementById('btn-manual-obj-guardar').addEventListener('click', function(){
+  if (!manualObjEditContext) return;
+  var estado = document.getElementById('manual-obj-estado').value.trim();
+  var detalle = document.getElementById('manual-obj-detalle').value.trim();
+  guardarObjetivoManual(manualObjEditContext.suc, manualObjEditContext.mes, manualObjEditContext.mesKey, manualObjEditContext.anio, manualObjEditContext.objNombre, estado, detalle);
+  cerrarManualObjModal();
+});
+
+function guardarObjetivoManual(suc, mesLabel, mesKey, anio, objNombre, estado, detalle) {
+  var companyId = empresaActual;
+  var emp = EMPRESAS[companyId];
+  if (!manualEditsCache[companyId]) manualEditsCache[companyId] = {anual:{}, mensual:{}};
+  if (mesKey === 'anual') manualEditsCache[companyId].anual[suc+'|'+objNombre] = {estado:estado, detalle:detalle};
+  else manualEditsCache[companyId].mensual[suc+'|'+mesKey+'|'+objNombre] = {estado:estado, detalle:detalle};
+
+  var fila = (companyId === 'euro')
+    ? [sucId(suc), suc, mesLabel, anio, objNombre, estado, detalle]
+    : [sucId(suc), suc, mesLabel, objNombre, estado, detalle];
+  fetch(emp.scriptUrl, {
+    method:'POST', mode:'no-cors',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({tipo:'objetivos', filas:[fila]})
+  }).catch(function(){});
+
+  renderCopecObjetivos();
+  toast('Objetivo guardado y sincronizado con Sheets');
+}
 
 function syncMetas(metas) {
   var emp = EMPRESAS[empresaActual];
