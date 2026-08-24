@@ -1316,6 +1316,29 @@ en vez de un encabezado con un mes-año distinto por columna:
       se vean razonables con datos reales — son cálculos nuevos, sin verificar contra el
       Excel real de Acciona todavía.
 
+## Objetivos "dormidos" por sucursal (agregado 2026-08-21)
+A pedido del usuario: opción para activar/desactivar (dormir) el seguimiento de un objetivo
+específico en una sucursal puntual (ej. una sucursal que no genera cierto tipo de residuo y
+por lo tanto nunca va a cumplir ese objetivo, sin que eso la perjudique en su % de salud).
+
+- **Guardado**: `localStorage['objetivos_dormidos']`, por empresa: `{empresaId: {sucursal:
+  [nombreObjetivo, ...]}}`. Funciones `getObjetivosDormidosUI(companyId)`,
+  `setObjetivosDormidosUI(map)`, `isObjetivoDormido(companyId, suc, objNombre)` — mismo patrón
+  que `sucursales_excluidas`/`isSucExcluidaParaSalud_`.
+- **UI**: nuevo botón "😴 Objetivos por sucursal" en la pestaña Objetivos (al lado de
+  "Sucursales cerradas" y "Editar metas"), visible si la empresa tiene sucursales y al menos
+  un objetivo definido. Abre una tabla sucursal × objetivo con un checkbox por celda (marcado
+  = dormido); "Guardar" persiste y vuelve a renderizar.
+- **Efecto en la tabla de Objetivos**: la celda de ese objetivo para esa sucursal muestra
+  "😴 Dormido" en vez de calcular/mostrar un estado — aplicado en las 6 filas posibles
+  (objetivos anuales, 100% trazabilidad, SINADER, KPI costo, y los manuales de Euro).
+- **Efecto en la salud ("% global")**: un objetivo dormido para una sucursal se excluye por
+  completo de su promedio — no cuenta como 0%, es como si no existiera para esa sucursal en
+  particular. Mismo filtro aplicado en `renderCopecObjetivos()` (empresa activa) y en
+  `calcSaludEmpresa_()` (panel de salud multi-empresa), para que ambos vistas coincidan.
+  Verificado con datos ficticios: promedio de 2 objetivos (uno OK=100, otro No=0) pasa de 50%
+  a 100% al dormir el que estaba en 0%.
+
 ## Cómo verificar sintaxis JS del archivo
 El HTML es un solo archivo con `<script>...</script>` embebido. Para validar sintaxis:
 ```bash

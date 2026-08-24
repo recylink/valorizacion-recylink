@@ -212,6 +212,7 @@ tbody tr:hover{background:var(--surface2)}
         </div>
         <button class="btn btn-ghost" id="btn-gestionar-sucursales" style="display:none">&#127970; Sucursales cerradas</button>
         <button class="btn btn-ghost" id="btn-editar-metas" style="display:none">&#9998; Editar metas</button>
+        <button class="btn btn-ghost" id="btn-gestionar-objetivos-suc" style="display:none">&#128564; Objetivos por sucursal</button>
       </div>
       <div id="sucursales-form" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
@@ -233,6 +234,19 @@ tbody tr:hover{background:var(--surface2)}
           </div>
         </div>
         <div id="metas-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px"></div>
+      </div>
+      <div id="objetivos-suc-form" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <span style="font-size:14px;font-weight:600;color:var(--text)">Objetivos dormidos por sucursal</span>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost" id="btn-cancelar-objetivos-suc">Cancelar</button>
+            <button class="btn btn-primary" id="btn-guardar-objetivos-suc">Guardar</button>
+          </div>
+        </div>
+        <p style="font-size:12px;color:var(--text-muted);margin:0 0 14px">Marca los objetivos que no aplican a una sucursal puntual (ej. no genera ese tipo de residuo): dejan de mostrarse y de contar en su % de salud, sin afectar al resto de las sucursales.</p>
+        <div style="max-height:420px;overflow:auto;border:1px solid var(--border);border-radius:8px">
+          <table id="objetivos-suc-table" style="width:100%;border-collapse:collapse;font-size:12px"></table>
+        </div>
       </div>
       <div id="obj-grid"></div>
     </div>
@@ -765,7 +779,9 @@ function calcSaludEmpresa_(companyId, data) {
   var sucursalesList = Object.keys(sucSet).filter(function(s){ return !isSucExcluidaParaSalud_(companyId, s); });
 
   return sucursalesList.map(function(suc){
-    var objScores = (emp.objetivos||[]).map(function(o){
+    var objScores = (emp.objetivos||[]).filter(function(o){
+      return !isObjetivoDormido(companyId, suc, o.nombre);
+    }).map(function(o){
       if (OBJ_ANUALES[o.tipo]) {
         var rAnu = objInfo.objAnualBySuc[suc+'|'+o.nombre];
         return rAnu ? scoreObjSalud_(rAnu.estado, rAnu.detalle) : 0;
@@ -868,6 +884,29 @@ function isSucExcluida(suc) {
   return getSucursalesExcluidasUI().indexOf(suc) >= 0;
 }
 
+// Objetivos "dormidos" (desactivados) para una sucursal puntual: dejan de
+// mostrarse en la tabla y de contar en el % de salud de esa sucursal, sin
+// afectar al resto de sucursales ni a otras empresas. localStorage, por
+// empresa: {empresaId: {sucursal: [nombreObjetivo, ...]}}.
+function getObjetivosDormidosUI(companyId) {
+  try {
+    var raw = localStorage.getItem('objetivos_dormidos');
+    var all = raw ? JSON.parse(raw) : {};
+    return all[companyId || empresaActual] || {};
+  } catch(e) { return {}; }
+}
+function setObjetivosDormidosUI(map) {
+  var raw = localStorage.getItem('objetivos_dormidos');
+  var all = {};
+  try { all = raw ? JSON.parse(raw) : {}; } catch(e) { all = {}; }
+  all[empresaActual] = map;
+  localStorage.setItem('objetivos_dormidos', JSON.stringify(all));
+}
+function isObjetivoDormido(companyId, suc, objNombre) {
+  var dormidosSuc = getObjetivosDormidosUI(companyId)[suc];
+  return !!dormidosSuc && dormidosSuc.indexOf(objNombre) >= 0;
+}
+
 function toast(msg, type) {
   var t = document.getElementById('toast');
   t.textContent = msg;
@@ -963,6 +1002,7 @@ function resetData() {
   document.getElementById('obj-content').style.display = hasObj ? 'block' : 'none';
   document.getElementById('btn-editar-metas').style.display = (empresaActual==='copec'||empresaActual==='acciona') ? 'inline-flex' : 'none';
   document.getElementById('btn-gestionar-sucursales').style.display = 'none';
+  document.getElementById('btn-gestionar-objetivos-suc').style.display = 'none';
   document.getElementById('sucursales-form').style.display = 'none';
   document.getElementById('obj-grid').innerHTML = '';
   renderCopecObjetivos();
@@ -1136,6 +1176,7 @@ function processData(rows, fname) {
   document.getElementById('obj-content').style.display=hasObj?'block':'none';
   document.getElementById('btn-editar-metas').style.display=(empresaActual==='copec'||empresaActual==='acciona')?'inline-flex':'none';
   document.getElementById('btn-gestionar-sucursales').style.display=sucursales.length>0?'inline-flex':'none';
+  document.getElementById('btn-gestionar-objetivos-suc').style.display=(sucursales.length>0&&emp.objetivos&&emp.objetivos.length>0)?'inline-flex':'none';
 
   document.getElementById('sync-dot').className='dot syncing';
   document.getElementById('sync-msg').textContent='Sincronizando con Google Sheets...';
@@ -1899,6 +1940,11 @@ function estadoCell(estado, detalle) {
     +(detalle?'<div style="font-size:10px;color:var(--text-muted);margin-top:3px;white-space:normal;line-height:1.6">'+detalle+'</div>':'')
     +'</td>';
 }
+// Celda para un objetivo dormido en esta sucursal (ver "Objetivos por
+// sucursal"): reemplaza la celda de estado normal, sin calcular nada.
+function celdaDormida() {
+  return '<td style="padding:9px 12px;text-align:center;border-left:1px solid var(--border);color:var(--text-muted);font-style:italic;font-size:11px">&#128564; Dormido</td>';
+}
 function isObjCumplido(estado){
   if(estado==='OK')return true;
   if(estado==='No')return false;
@@ -2262,6 +2308,7 @@ function loadSheetsData(data) {
   document.getElementById('obj-empty').style.display = (hasObj || empresaActual === 'copec' || empresaActual === 'abastible') ? 'none' : '';
   document.getElementById('btn-editar-metas').style.display = (empresaActual === 'copec'||empresaActual==='acciona') ? 'inline-flex' : 'none'; // Abastible no tiene metas editables
   document.getElementById('btn-gestionar-sucursales').style.display = sucursales.length > 0 ? 'inline-flex' : 'none';
+  document.getElementById('btn-gestionar-objetivos-suc').style.display = (sucursales.length > 0 && emp.objetivos && emp.objetivos.length > 0) ? 'inline-flex' : 'none';
 
 
   renderTrazHeaders(); renderVal(); renderChart(); renderTraz();
@@ -2450,7 +2497,12 @@ function renderCopecObjetivos() {
     // objetivos informativos sin meta numerica (ej. CO2ev/m2, que solo
     // llena "detalle" y nunca "estado") cuentan 100% si tienen algun valor
     // calculado, 0% si no. Mismo codigo para las 10 empresas.
-    var objScoresAll = (emp.objetivos || []).map(function(o){
+    // Los objetivos "dormidos" para esta sucursal puntual (ver boton
+    // "Objetivos por sucursal") no cuentan ninguna unidad en el promedio —
+    // se tratan como si no existieran para esta sucursal, no como 0%.
+    var objScoresAll = (emp.objetivos || []).filter(function(o){
+      return !isObjetivoDormido(empresaActual, suc, o.nombre);
+    }).map(function(o){
       if (OBJ_ANUALES[o.tipo]) {
         var rAnu = objAnualBySuc[suc+'|'+o.nombre];
         return rAnu ? scoreObjSalud_(rAnu.estado, rAnu.detalle) : 0;
@@ -2501,11 +2553,13 @@ function renderCopecObjetivos() {
       anualTable.innerHTML='<thead><tr><th style="'+thFirst+'">Objetivo</th><th style="'+thCol+'">Estado</th></tr></thead>';
       var anualBody=document.createElement('tbody');
       objetivosAnuales.forEach(function(o, i){
+        var dormido = isObjetivoDormido(empresaActual, suc, o.nombre);
         var r = objAnualBySuc[suc+'|'+o.nombre];
         var tr=document.createElement('tr');
         if (i>0) tr.style.borderTop='1px solid var(--border)';
         var cells='<td style="padding:9px 12px;font-weight:500;color:var(--text);border-right:1px solid var(--border)">'+o.nombre+'</td>';
-        cells += r ? estadoCell(r.estado, r.detalle) : '<td style="padding:9px 12px;text-align:center;border-left:1px solid var(--border);color:var(--text-muted)">--</td>';
+        cells += dormido ? celdaDormida()
+          : (r ? estadoCell(r.estado, r.detalle) : '<td style="padding:9px 12px;text-align:center;border-left:1px solid var(--border);color:var(--text-muted)">--</td>');
         tr.innerHTML=cells;
         anualBody.appendChild(tr);
       });
@@ -2557,7 +2611,9 @@ function renderCopecObjetivos() {
     var trTraz=document.createElement('tr');
     trTraz.style.borderTop='2px solid var(--border)';
     var trazCells='<td style="padding:9px 12px;font-weight:500;color:var(--text);border-right:1px solid var(--border)">100% trazabilidad<div style="font-size:10px;color:var(--text-muted);font-weight:400">Transportista + Disp. final</div></td>';
+    var trazDormido = isObjetivoDormido(empresaActual, suc, '100% trazabilidad');
     mesesToShow.forEach(function(m){
+      if(trazDormido){trazCells+=celdaDormida();return;}
       var r=objBySucMes[suc+'|'+m+'|100% trazabilidad'];
       if(!r){trazCells+='<td style="padding:9px 12px;text-align:center;border-left:1px solid var(--border);color:var(--text-muted)">--</td>';return;}
       trazCells += estadoCell(r.estado, r.detalle);
@@ -2601,7 +2657,9 @@ function renderCopecObjetivos() {
       var trSin=document.createElement('tr');
       trSin.style.borderTop='2px solid var(--border)';
       var sinCells='<td style="padding:9px 12px;font-weight:500;color:var(--text);border-right:1px solid var(--border)">'+objSinader.nombre+'</td>';
+      var sinDormido = isObjetivoDormido(empresaActual, suc, objSinader.nombre);
       mesesToShow.forEach(function(m){
+        if(sinDormido){sinCells+=celdaDormida();return;}
         var r = objBySucMes[suc+'|'+m+'|'+objSinader.nombre];
         if(!r){sinCells+='<td style="padding:9px 12px;text-align:center;border-left:1px solid var(--border);color:var(--text-muted)">--</td>';return;}
         sinCells += estadoCell(r.estado, r.detalle);
@@ -2615,7 +2673,9 @@ function renderCopecObjetivos() {
       var trKpi=document.createElement('tr');
       trKpi.style.borderTop='1px solid var(--border)';
       var kpiCells='<td style="padding:9px 12px;font-weight:500;color:var(--text);border-right:1px solid var(--border)">KPI costo e ingreso</td>';
+      var kpiDormido = isObjetivoDormido(empresaActual, suc, objKpi.nombre);
       mesesToShow.forEach(function(m){
+        if(kpiDormido){kpiCells+=celdaDormida();return;}
         var r = objBySucMes[suc+'|'+m+'|'+objKpi.nombre];
         if(!r){kpiCells+='<td style="padding:9px 12px;text-align:center;border-left:1px solid var(--border);color:var(--text-muted)">--</td>';return;}
         kpiCells += estadoCell(r.estado, r.detalle);
@@ -2645,7 +2705,9 @@ function renderCopecObjetivos() {
       var trMan=document.createElement('tr');
       trMan.style.borderTop='1px solid var(--border)';
       var manCells='<td style="padding:9px 12px;font-weight:500;color:var(--text);border-right:1px solid var(--border)">'+objManual.nombre+'</td>';
+      var manDormido = isObjetivoDormido(empresaActual, suc, objManual.nombre);
       mesesToShow.forEach(function(m){
+        if(manDormido){manCells+=celdaDormida();return;}
         var r = objBySucMes[suc+'|'+m+'|'+objManual.nombre];
         if(!r){manCells+='<td style="padding:9px 12px;text-align:center;border-left:1px solid var(--border);color:var(--text-muted)">--</td>';return;}
         manCells += estadoCell(r.estado, r.detalle);
@@ -2735,6 +2797,51 @@ document.getElementById('btn-guardar-metas').addEventListener('click', function(
   syncMetas(metas);
   renderCopecObjetivos();
   toast('Metas guardadas');
+});
+
+// Editor de objetivos dormidos por sucursal: tabla sucursal x objetivo con un
+// checkbox por celda (marcado = ese objetivo esta dormido para esa sucursal
+// puntual). Guarda en localStorage via setObjetivosDormidosUI, por empresa.
+function openObjetivosSucursalEditor() {
+  var emp = EMPRESAS[empresaActual];
+  var objs = emp.objetivos || [];
+  var dormidos = getObjetivosDormidosUI();
+  var thCells = objs.map(function(o){
+    return '<th style="position:sticky;top:0;background:var(--surface2);padding:8px 10px;border-bottom:1px solid var(--border);border-left:1px solid var(--border);font-size:11px;color:var(--text-muted);max-width:150px">'+o.nombre+'</th>';
+  }).join('');
+  var rows = sucursales.map(function(suc){
+    var dormidosSuc = dormidos[suc] || [];
+    var sucAttr = suc.replace(/"/g,'&quot;');
+    var cells = objs.map(function(o){
+      var checked = dormidosSuc.indexOf(o.nombre) >= 0;
+      var objAttr = o.nombre.replace(/"/g,'&quot;');
+      return '<td style="padding:7px 10px;border-bottom:1px solid var(--border);border-left:1px solid var(--border);text-align:center"><input type="checkbox" data-suc="'+sucAttr+'" data-obj="'+objAttr+'" '+(checked?'checked':'')+'></td>';
+    }).join('');
+    return '<tr><td style="padding:7px 10px;border-bottom:1px solid var(--border);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px" title="'+suc+'">'+suc+'</td>'+cells+'</tr>';
+  }).join('');
+  document.getElementById('objetivos-suc-table').innerHTML =
+    '<thead><tr><th style="position:sticky;top:0;background:var(--surface2);text-align:left;padding:8px 10px;border-bottom:1px solid var(--border);font-size:11px;text-transform:uppercase;color:var(--text-muted)">Sucursal</th>'+thCells+'</tr></thead>'
+    + '<tbody>'+rows+'</tbody>';
+  document.getElementById('objetivos-suc-form').style.display = 'block';
+}
+
+document.getElementById('btn-gestionar-objetivos-suc').addEventListener('click', openObjetivosSucursalEditor);
+document.getElementById('btn-cancelar-objetivos-suc').addEventListener('click', function() {
+  document.getElementById('objetivos-suc-form').style.display = 'none';
+});
+document.getElementById('btn-guardar-objetivos-suc').addEventListener('click', function() {
+  var map = {};
+  document.querySelectorAll('#objetivos-suc-table input[type=checkbox]').forEach(function(inp) {
+    if (!inp.checked) return;
+    var suc = inp.getAttribute('data-suc');
+    var obj = inp.getAttribute('data-obj');
+    if (!map[suc]) map[suc] = [];
+    map[suc].push(obj);
+  });
+  setObjetivosDormidosUI(map);
+  document.getElementById('objetivos-suc-form').style.display = 'none';
+  renderCopecObjetivos();
+  toast('Objetivos dormidos guardados');
 });
 
 function syncMetas(metas) {
