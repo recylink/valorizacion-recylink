@@ -518,6 +518,11 @@ function isRespel(residuo) {
 }
 var DOC_LABELS = {cert:'cert. tratamiento',factura:'factura',decl:'cert. declaracion',transp:'transportista',disp:'disposicion final'};
 var OBJ_ANUALES = {valorizar_residuo:1,reg_valorizar:1,respel:1,valorizar_especificos:1,acompanamiento_anual:1,manual_anual:1,segregacion_anual:1};
+// Nombre "virtual" para poder dormir por sucursal el aporte de % valorizacion
+// vs. meta al calculo de salud — no es un objetivo real de emp.objetivos (no
+// tiene fila propia en la tabla), pero se trata igual para efectos de
+// isObjetivoDormido/getObjetivosDormidosUI.
+var META_VAL_OBJ_NOMBRE = '% Valorización vs. meta';
 
 var ABASTIBLE_METAS = {
   'Planta Concón': 15,
@@ -798,7 +803,7 @@ function calcSaludEmpresa_(companyId, data) {
     });
     var meta = metas[suc] !== undefined ? metas[suc] : null;
     var acum = ultimoAcum_(valInfo.acumBySuc, suc);
-    if (meta !== null && meta > 0 && acum !== null) objScores.push(Math.min(100, acum/meta*100));
+    if (meta !== null && meta > 0 && acum !== null && !isObjetivoDormido(companyId, suc, META_VAL_OBJ_NOMBRE)) objScores.push(Math.min(100, acum/meta*100));
     var pct = objScores.length ? objScores.reduce(function(s,v){return s+v;},0)/objScores.length : 0;
     var estado = pct>=75?'OK':pct>=50?'Atención':'Acción';
     return {suc:suc, pct:pct, estado:estado};
@@ -2519,8 +2524,11 @@ function renderCopecObjetivos() {
     // una fila de "objetivo" visible para eso (ej. las de Gespania/Ando que
     // se quitaron de la UI). Solo se agrega si la sucursal tiene meta
     // definida; si no, no aporta ni resta unidades al promedio. Mismo
-    // criterio para las 10 empresas.
-    if (meta !== null && meta > 0 && acum !== null) objScoresAll.push(Math.min(100, acum/meta*100));
+    // criterio para las 10 empresas. Puede dormirse por sucursal (ver boton
+    // "Objetivos por sucursal", columna META_VAL_OBJ_NOMBRE) igual que
+    // cualquier otro objetivo.
+    var metaDormida = isObjetivoDormido(empresaActual, suc, META_VAL_OBJ_NOMBRE);
+    if (meta !== null && meta > 0 && acum !== null && !metaDormida) objScoresAll.push(Math.min(100, acum/meta*100));
     var pctGlobal = objScoresAll.length ? objScoresAll.reduce(function(s,v){return s+v;},0)/objScoresAll.length : 0;
     // 3 estados de salud (agregado 2026-08-20, a pedido del usuario):
     // 0-49% Acción (rojo), 50-74% Atención (amarillo), 75-100% OK (verde).
@@ -2535,7 +2543,7 @@ function renderCopecObjetivos() {
       +'<div style="width:100px;background:var(--surface2);border-radius:4px;height:6px;overflow:hidden">'
       +'<div style="width:'+pctGlobal.toFixed(0)+'%;height:6px;border-radius:4px;background:'+colorGlobal+'"></div></div>'
       +'<span style="font-size:14px;font-weight:700;color:'+colorGlobal+'">'+estadoSalud+' · '+pctGlobal.toFixed(0)+'%</span>'
-      +(meta!==null?'<span style="font-size:11px;color:var(--text-muted)">Meta val.: '+meta+'%</span>':'')
+      +(meta!==null?'<span style="font-size:11px;color:var(--text-muted)">Meta val.: '+meta+'%'+(metaDormida?' &#128564;':'')+'</span>':'')
       +(acum!==null?'<span style="font-size:13px;font-weight:600;color:'+colorAcum+'">'+fmtPct(acum)+' acum.</span>':'')
       +'</div>';
     grid.appendChild(header);
@@ -2804,10 +2812,17 @@ document.getElementById('btn-guardar-metas').addEventListener('click', function(
 // puntual). Guarda en localStorage via setObjetivosDormidosUI, por empresa.
 function openObjetivosSucursalEditor() {
   var emp = EMPRESAS[empresaActual];
-  var objs = emp.objetivos || [];
+  // El % de valorizacion vs. meta no es un objetivo real de emp.objetivos
+  // (no tiene fila propia), pero tambien se puede dormir por sucursal — se
+  // agrega como una columna mas, al final.
+  var objs = (emp.objetivos || []).concat([{nombre: META_VAL_OBJ_NOMBRE}]);
   var dormidos = getObjetivosDormidosUI();
+  // white-space:normal explicito porque el selector global "thead th" del
+  // CSS de la pagina fuerza white-space:nowrap, que junto con max-width
+  // hacia que los nombres largos de objetivo (ej. en Euro) se dibujaran
+  // superpuestos en vez de verse completos.
   var thCells = objs.map(function(o){
-    return '<th style="position:sticky;top:0;background:var(--surface2);padding:8px 10px;border-bottom:1px solid var(--border);border-left:1px solid var(--border);font-size:11px;color:var(--text-muted);max-width:150px">'+o.nombre+'</th>';
+    return '<th style="position:sticky;top:0;background:var(--surface2);padding:8px 10px;border-bottom:1px solid var(--border);border-left:1px solid var(--border);font-size:11px;color:var(--text-muted);width:150px;white-space:normal;word-break:break-word;line-height:1.4">'+o.nombre+'</th>';
   }).join('');
   var rows = sucursales.map(function(suc){
     var dormidosSuc = dormidos[suc] || [];

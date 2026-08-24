@@ -1339,6 +1339,25 @@ por lo tanto nunca va a cumplir ese objetivo, sin que eso la perjudique en su % 
   Verificado con datos ficticios: promedio de 2 objetivos (uno OK=100, otro No=0) pasa de 50%
   a 100% al dormir el que estaba en 0%.
 
+**2 bugs reportados por el usuario en Euro, corregidos (2026-08-21)**:
+1. No aparecía la opción de dormir la "meta de valorización" (el % acumulado vs. la meta de
+   la sucursal, ej. el 5% de Euro) porque esa fila NO es un objetivo real de `emp.objetivos`
+   — es un calculo aparte (`% Valorización real` / `% Acumulado` / `Meta 2026`) que solo se
+   sumaba como una unidad mas al promedio de salud. Se agregó una entrada "virtual"
+   `META_VAL_OBJ_NOMBRE = '% Valorización vs. meta'` que aparece como columna extra en el
+   editor de "Objetivos por sucursal" (no tiene fila propia en la tabla); al dormirla, esa
+   sucursal deja de sumar el % valorización vs. meta a su promedio de salud, y el encabezado
+   de la sucursal le agrega un 😴 junto a "Meta val.: X%" para que quede claro que esta
+   dormida. Aplicado en ambos puntos donde se sumaba (`renderCopecObjetivos()` y
+   `calcSaludEmpresa_()`).
+2. Los nombres largos de objetivo (ej. en Euro: "Acompañamiento en terreno, mediante charlas
+   y una auditoría") no se leían completos en la tabla del editor "Objetivos por sucursal".
+   Causa: el CSS global `thead th{...white-space:nowrap}` (pensado para los encabezados de
+   la tabla principal de Objetivos) se aplicaba tambien a esta tabla nueva y, combinado con el
+   `max-width:150px` de sus columnas, hacia que el texto no hiciera salto de linea y se
+   dibujara superpuesto sobre las columnas vecinas en vez de envolverse. Corregido forzando
+   `white-space:normal;word-break:break-word` en los `<th>` de esta tabla especifica.
+
 ## Cómo verificar sintaxis JS del archivo
 El HTML es un solo archivo con `<script>...</script>` embebido. Para validar sintaxis:
 ```bash
