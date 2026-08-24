@@ -799,6 +799,13 @@ function calcSaludEmpresa_(companyId, data) {
   var valInfo = parseValorizacionRows_(data.valorizacion);
   var objInfo = parseObjetivosRows_(data.objetivos);
   var metas = resolveMetaEmpresa_(companyId, valInfo.sucursales, valInfo.metaFromSheet);
+  // Ediciones manuales de esta sesion (ver guardarObjetivoManual): por si
+  // este calculo corre antes de que el Sheet ya refleje el ultimo guardado.
+  var edits = manualEditsCache[companyId];
+  if (edits) {
+    Object.assign(objInfo.objAnualBySuc, edits.anual);
+    Object.assign(objInfo.objBySucMes, edits.mensual);
+  }
 
   var sucSet = {};
   valInfo.sucursales.forEach(function(s){ sucSet[s] = true; });
@@ -2991,14 +2998,30 @@ function guardarObjetivoManual(suc, mesLabel, mesKey, anio, objNombre, estado, d
   var fila = (companyId === 'euro')
     ? [sucId(suc), suc, mesLabel, anio, objNombre, estado, detalle]
     : [sucId(suc), suc, mesLabel, objNombre, estado, detalle];
+
+  renderCopecObjetivos();
+  toast('Objetivo guardado y sincronizado con Sheets');
+
+  // El panel de salud (izquierda) NO usa manualEditsCache — sus datos se
+  // cargan una sola vez al iniciar la app (cargarSaludTodas) y solo se
+  // recalculan con el boton "Actualizar" manual, asi que sin esto un
+  // objetivo editado quedaba viejo ahi hasta que alguien lo apretara.
+  // Se refresca solo la empresa editada (no las 10), y solo si ya estaba
+  // cargada, encadenado despues de que el POST realmente termine (para no
+  // leer el Sheet antes de que la escritura se haya aplicado).
   fetch(emp.scriptUrl, {
     method:'POST', mode:'no-cors',
     headers:{'Content-Type':'application/json'},
     body: JSON.stringify({tipo:'objetivos', filas:[fila]})
+  }).then(function(){
+    if (!saludPorEmpresa[companyId] || saludPorEmpresa[companyId] === 'error') return;
+    return fetch(emp.scriptUrl, {method:'GET', mode:'cors'})
+      .then(function(r){ return r.json(); })
+      .then(function(data){
+        saludPorEmpresa[companyId] = calcSaludEmpresa_(companyId, data || {});
+        renderSaludPanel();
+      });
   }).catch(function(){});
-
-  renderCopecObjetivos();
-  toast('Objetivo guardado y sincronizado con Sheets');
 }
 
 function syncMetas(metas) {

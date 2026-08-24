@@ -1348,6 +1348,24 @@ del Sheet y escribirlo a mano. El cambio se sincroniza al Sheet al instante.
   Euro/Acciona): formato de fila correcto en ambos casos (7 y 6 columnas), el visor se
   actualiza al instante tras guardar, y "Vaciar" limpia los campos correctamente.
 
+**Bug reportado por el usuario, corregido (2026-08-21)**: al editar un objetivo manual, el
+cambio se veía al instante en la tabla de Objetivos pero NO en el panel de salud (izquierda).
+Causa: el panel de salud (`saludPorEmpresa`) carga los datos de las 10 empresas una sola vez
+al iniciar la app (`cargarSaludTodas()`) y solo se recalcula si el usuario aprieta el boton
+"&#8635; Actualizar" a mano — `guardarObjetivoManual()` nunca tocaba ese estado. Corregido en
+2 partes:
+1. `guardarObjetivoManual()` ahora, despues de que el POST de sync realmente termina (no antes
+   — para no leer el Sheet a mitad de la escritura), refresca SOLO la empresa editada (no las
+   10): un GET fresco + `calcSaludEmpresa_()` + `renderSaludPanel()`. Solo lo hace si esa
+   empresa ya estaba cargada en el panel (evita una llamada de red si el usuario nunca abrio
+   el panel de salud).
+2. `calcSaludEmpresa_()` tambien mergea `manualEditsCache[companyId]` encima de
+   `objInfo.objAnualBySuc`/`objBySucMes` (mismo patron que ya se usa en
+   `renderCopecObjetivos()`), como red de seguridad para cualquier otro refresco (ej. el boton
+   "Actualizar" manual sobre otra empresa) mientras la escritura al Sheet este en curso.
+Verificado en vivo: el % de salud de una sucursal de Euro paso de 25% a 75% automaticamente
+al marcar "Contactar Nuevos proveedores" como OK, sin apretar "Actualizar".
+
 ## Objetivos "dormidos" por sucursal (agregado 2026-08-21)
 A pedido del usuario: opción para activar/desactivar (dormir) el seguimiento de un objetivo
 específico en una sucursal puntual (ej. una sucursal que no genera cierto tipo de residuo y
