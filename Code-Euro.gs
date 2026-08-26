@@ -2,9 +2,8 @@
  * ============================================================
  * RECYLINK · Apps Script del Sheet de EURO
  * ============================================================
- * Proyecto de Apps Script nuevo, para vincular al Sheet de Euro
- * (ID 1au2aa9n0Sh6kYS5TEq28g1nmS_4O9tZFDNaf3j7CQoY). No existía Apps
- * Script previo para esta empresa.
+ * Proyecto de Apps Script vinculado al Sheet de Euro
+ * (ID 1au2aa9n0Sh6kYS5TEq28g1nmS_4O9tZFDNaf3j7CQoY).
  *
  * Mismo esquema que Code-Gespania.gs / Code-Salfa.gs: writeObjetivos
  * borra solo por empresa_id + mes exacto (no por prefijo de empresa
@@ -14,10 +13,69 @@
  * Requiere que el Sheet tenga las pestañas "Total Residuos" (headers:
  * Sucursal | Mes | Residuo | Valorizado/No Valorizado | Respel no
  * respel | Total KG | Total M3) y "RESPEL" (headers: Residuo | RESPEL)
- * ya creadas — Euro ya las trae, solo confirmar que los headers
- * coincidan exactamente antes de desplegar.
+ * ya creadas.
+ *
+ * AGREGADO 2026-08-19: soporte de la pestaña "Minuta" — lectura vía
+ * GET ?minutas=1 y guardado vía POST tipo:'minutas'. Ajusta
+ * MINUTA_SHEET_NAME más abajo si tu pestaña tiene otro nombre.
+ *
+ * AGREGADO 2026-08-26: soporte de "👥 Seguimiento_CSE" editable desde
+ * el visor — guardado vía POST tipo:'cse' (writeCSE_). La lectura
+ * (readCseSheet_) ya existía.
+ *
+ * AGREGADO 2026-08-26 (2): doGet ahora también expone "Total Residuos"
+ * (readTotalResiduosSheet_) para que el visor recalcule FGR/CO2ev·m² en
+ * vivo cuando se edita el % Avance en la pestaña FGR — el % Avance en sí
+ * se guarda con el mismo POST tipo:'avance' (writeAvance) que ya existía.
+ *
+ * FIX 2026-08-26 (3): writeTotalResiduos ya no borra toda la hoja en cada
+ * carga — ahora borra solo las filas Sucursal+Año+Mes que trae el Excel
+ * nuevo (mismo criterio que writeValorizacion/writeTrazabilidad/
+ * writeObjetivos), porque el Excel de Euro normalmente trae un solo mes
+ * y antes eso borraba el histórico completo de "Total Residuos".
  * ============================================================
  */
+
+var MINUTA_SHEET_NAME = 'Minuta'; // ← cambia esto si tu pestaña tiene otro nombre
+
+function doGet(e) {
+  // ── Minutas: se atiende aparte y se corta acá, antes de armar el
+  // resto del payload estándar (valorizacion/trazabilidad/objetivos/...).
+  if (e.parameter && e.parameter.minutas) {
+    return ContentService
+      .createTextOutput(JSON.stringify({ rows: readMinutaRows_() }))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const startRow = 6;
+
+  function readSheet(nombre) {
+    const sheet = ss.getSheetByName(nombre);
+    if (!sheet || sheet.getLastRow() < startRow) return [];
+    const headers = sheet.getRange(5, 1, 1, sheet.getLastColumn()).getValues()[0];
+    const data = sheet.getRange(startRow, 1, sheet.getLastRow() - startRow + 1, sheet.getLastColumn()).getValues();
+    return data.filter(r => r[0] !== '').map(r => {
+      const obj = {};
+      headers.forEach((h, i) => { obj[h] = r[i]; });
+      return obj;
+    });
+  }
+
+  const result = {
+    valorizacion: readSheet('♻️ Valorización') || readSheet('Valorización'),
+    trazabilidad: readSheet('📊 Trazabilidad_Docs') || readSheet('Trazabilidad_Docs'),
+    objetivos: readSheet('🎯 Objetivos') || readSheet('Objetivos'),
+    respel: readRespelSheet_(),
+    avance: readAvanceSheet_(),
+    cse: readCseSheet_(),
+    totalResiduos: readTotalResiduosSheet_()
+  };
+
+  return ContentService
+    .createTextOutput(JSON.stringify(result))
+    .setMimeType(ContentService.MimeType.JSON);
+}
 
 function doPost(e) {
   try {
@@ -31,6 +89,8 @@ function doPost(e) {
     else if (tipo === 'objetivos') writeObjetivos(ss, data);
     else if (tipo === 'totalResiduos') writeTotalResiduos(ss, data);
     else if (tipo === 'avance') writeAvance(ss, data);
+    else if (tipo === 'minutas') writeMinutaSessions_(data.sessions);
+    else if (tipo === 'cse') writeCSE_(ss, data);
 
     return ContentService
       .createTextOutput(JSON.stringify({ok: true}))
@@ -151,24 +211,66 @@ function buscarFilaEncabezado_(sheet, valorEsperado) {
   return null;
 }
 
-// Reemplaza TODAS las filas de datos de "Total Residuos" por las que manda
-// el cliente. El cliente siempre envia el set completo vigente (calculado
-// desde el Excel cargado), asi que no hace falta borrado selectivo por
-// empresa_id como en writeValorizacion (esta hoja no tiene esa columna).
+// Reemplaza SOLO las filas de "Total Residuos" cuya Sucursal+Año+Mes
+// coincide con lo que trae el Excel recién cargado — igual criterio que
+// writeValorizacion/writeTrazabilidad/writeObjetivos (borrado selectivo
+// por "identidad" del grupo, no de la hoja entera). El resto de
+// obras/meses no tocados por esta carga queda intacto.
+// FIX (2026-08-26): antes hacía sheet.getRange(...).clearContent() sobre
+// TODA la hoja de datos, así que un Excel de un solo mes (el caso normal
+// para Euro) borraba el histórico completo de meses anteriores — grave
+// porque el visor usa esta hoja para el FGR/CO2ev·m² acumulado en vivo.
 function writeTotalResiduos(ss, data) {
   var sheet = ss.getSheetByName('Total Residuos');
   if (!sheet) throw new Error('Hoja "Total Residuos" no encontrada');
   var headerRow = buscarFilaEncabezado_(sheet, 'Sucursal');
   if (!headerRow) throw new Error('No se encontro la fila de encabezado ("Sucursal") en Total Residuos');
   var startRow = headerRow + 1;
-  var numCols = 9; // Sucursal | Año | Mes | Residuo | Valorizado/No Valorizado | Respel no respel | Total KG | Total M3 | Tons. CO2eq. evitadas
   var lastRow = sheet.getLastRow();
-  if (lastRow >= startRow) {
-    sheet.getRange(startRow, 1, lastRow - startRow + 1, numCols).clearContent();
-  }
+
   if (data.filas && data.filas.length > 0) {
-    sheet.getRange(startRow, 1, data.filas.length, data.filas[0].length).setValues(data.filas);
+    // Clave = Sucursal|Año|Mes (columnas A|B|C). No se incluye Residuo en
+    // la clave a propósito: si el Excel nuevo trae un desglose distinto
+    // de residuos para esa misma Sucursal+Año+Mes (uno menos, uno nuevo),
+    // TODAS las filas viejas de ese mes se reemplazan por el set nuevo
+    // completo, en vez de dejar filas de residuos obsoletas mezcladas.
+    var keys = new Set(data.filas.map(function (f) { return String(f[0]) + '|' + String(f[1]) + '|' + String(f[2]); }));
+    if (lastRow >= startRow) {
+      var cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 3).getValues();
+      var toDelete = [];
+      cols.forEach(function (r, i) {
+        var key = String(r[0]) + '|' + String(r[1]) + '|' + String(r[2]);
+        if (keys.has(key)) toDelete.push(startRow + i);
+      });
+      toDelete.reverse().forEach(function (r) { sheet.deleteRow(r); });
+    }
+    var insertRow = sheet.getLastRow() + 1;
+    sheet.getRange(insertRow, 1, data.filas.length, data.filas[0].length).setValues(data.filas);
   }
+}
+
+// Lee "Total Residuos" completa como array de objetos (Sucursal | Año |
+// Mes | Residuo | Valorizado/No Valorizado | Respel no respel | Total KG |
+// Total M3 | Tons. CO2eq. evitadas), agregado 2026-08-26 para que el
+// visor pueda recalcular FGR/CO2ev·m² en vivo a partir del % Avance que
+// se edita ahí (necesita los m³ y las Ton CO2 evitadas por Sucursal+Mes,
+// que hasta ahora solo vivían en esta hoja sin exponerse por GET).
+function readTotalResiduosSheet_() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Total Residuos');
+  if (!sheet) return [];
+  var headerRow = buscarFilaEncabezado_(sheet, 'Sucursal');
+  if (!headerRow) return [];
+  var startRow = headerRow + 1;
+  var lastRow = sheet.getLastRow();
+  if (lastRow < startRow) return [];
+  var lastCol = sheet.getLastColumn();
+  var headers = sheet.getRange(headerRow, 1, 1, lastCol).getValues()[0];
+  var data = sheet.getRange(startRow, 1, lastRow - startRow + 1, lastCol).getValues();
+  return data.filter(function (r) { return String(r[0] || '').trim() !== ''; }).map(function (r) {
+    var obj = {};
+    headers.forEach(function (h, i) { if (h) obj[h] = r[i]; });
+    return obj;
+  });
 }
 
 // Lee la hoja RESPEL (Residuo -> TRUE/FALSE) como array de objetos, igual
@@ -306,32 +408,113 @@ function readCseSheet_() {
   });
 }
 
-function doGet(e) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const startRow = 6;
+// Guarda in-place (por empresa_id + Acción, igual criterio que writeAvance
+// con Sucursal+Tipo+Año) los valores SI/NO/N/A por mes que edita el visor
+// desde el Seguimiento CSE clickeable; si la fila empresa_id+Acción no
+// existe todavía la crea. OJO: si el header real de la columna de acción
+// en el Sheet no es exactamente "Acción" (con tilde), ajustar colAccion.
+function writeCSE_(ss, data) {
+  var sheet = ss.getSheetByName('👥 Seguimiento_CSE') || ss.getSheetByName('Seguimiento_CSE');
+  if (!sheet) throw new Error('Hoja "Seguimiento_CSE" no encontrada');
+  var headerRow = buscarFilaEncabezado_(sheet, 'empresa_id');
+  if (!headerRow) throw new Error('No se encontró la fila de encabezado ("empresa_id") en Seguimiento_CSE');
+  var startRow = headerRow + 1;
+  var lastCol = sheet.getLastColumn();
+  var headers = sheet.getRange(headerRow, 1, 1, lastCol).getValues()[0];
 
-  function readSheet(nombre) {
-    const sheet = ss.getSheetByName(nombre);
-    if (!sheet || sheet.getLastRow() < startRow) return [];
-    const headers = sheet.getRange(5, 1, 1, sheet.getLastColumn()).getValues()[0];
-    const data = sheet.getRange(startRow, 1, sheet.getLastRow() - startRow + 1, sheet.getLastColumn()).getValues();
-    return data.filter(r => r[0] !== '').map(r => {
-      const obj = {};
-      headers.forEach((h, i) => { obj[h] = r[i]; });
-      return obj;
+  var idx = {};
+  headers.forEach(function (h, i) { if (h) idx[String(h).trim()] = i + 1; });
+  var colEmpresa = idx['empresa_id'];
+  var colAccion = idx['Acción'] || idx['Accion'];
+  var colSucursal = idx['Sucursal'];
+  if (!colEmpresa || !colAccion) throw new Error('Encabezados "empresa_id"/"Acción" no encontrados en Seguimiento_CSE');
+
+  var colByMes = {};
+  headers.forEach(function (h, i) {
+    var norm = String(h || '').trim();
+    var col = i + 1;
+    if (norm && col !== colEmpresa && col !== colAccion && col !== colSucursal) colByMes[norm.toUpperCase()] = col;
+  });
+
+  var lastRow = sheet.getLastRow();
+  var existentes = lastRow >= startRow
+    ? sheet.getRange(startRow, 1, lastRow - startRow + 1, lastCol).getValues()
+    : [];
+
+  (data.filas || []).forEach(function (fila) {
+    var targetRow = null;
+    for (var i = 0; i < existentes.length; i++) {
+      var r = existentes[i];
+      if (String(r[colEmpresa - 1]).trim() === fila.empresaId && String(r[colAccion - 1]).trim() === fila.accion) {
+        targetRow = startRow + i;
+        break;
+      }
+    }
+    if (!targetRow) {
+      targetRow = sheet.getLastRow() + 1;
+      sheet.getRange(targetRow, colEmpresa).setValue(fila.empresaId);
+      sheet.getRange(targetRow, colAccion).setValue(fila.accion);
+      if (colSucursal) sheet.getRange(targetRow, colSucursal).setValue(fila.sucursal);
+    }
+    Object.keys(fila.valores || {}).forEach(function (mesNombre) {
+      var col = colByMes[mesNombre.toUpperCase()];
+      if (!col) return;
+      sheet.getRange(targetRow, col).setValue(fila.valores[mesNombre]);
     });
+  });
+}
+
+// ── "Minuta" (agregado 2026-08-19) ──
+
+// Lee la pestaña de Minuta completa como matriz de valores (tal cual está
+// en el Sheet), igual formato que espera el front-end (mnRowsToSessions
+// del visor: fila-título con solo columna A llena, luego opcionalmente
+// una fila "Tema/Revisado/Detalle/Acuerdos/Resuelto", luego filas de
+// ítems, hasta la próxima fila-título o el final de la hoja).
+function readMinutaRows_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(MINUTA_SHEET_NAME);
+  if (!sheet) return [];
+  var lastRow = sheet.getLastRow();
+  var lastCol = sheet.getLastColumn();
+  if (lastRow < 1 || lastCol < 1) return [];
+  return sheet.getRange(1, 1, lastRow, lastCol).getValues();
+}
+
+// Reescribe la pestaña de Minuta completa a partir de las "sessions" que
+// manda el front-end. Cada session = { title, items: [{item, cumplido,
+// comentario, acuerdos, revisado}] }. Se reconstruye con el mismo formato
+// de fila-título + fila "Tema|Revisado|Detalle|Acuerdos|Resuelto" + filas
+// de datos + fila en blanco separadora, para que el próximo GET lo vuelva
+// a parsear igual.
+function writeMinutaSessions_(sessions) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(MINUTA_SHEET_NAME);
+  if (!sheet) throw new Error('Hoja "' + MINUTA_SHEET_NAME + '" no encontrada');
+
+  var rows = [];
+  (sessions || []).forEach(function (sess) {
+    rows.push([sess.title || '', '', '', '', '']);
+    rows.push(['Tema', 'Revisado', 'Detalle', 'Acuerdos', 'Resuelto']);
+    (sess.items || []).forEach(function (it) {
+      rows.push([
+        it.item || '',
+        it.revisado ? true : false,
+        it.comentario || '',
+        it.acuerdos || '',
+        it.cumplido ? true : false
+      ]);
+    });
+    rows.push(['', '', '', '', '']); // fila en blanco separadora
+  });
+
+  sheet.clearContents();
+  if (rows.length) {
+    var numCols = Math.max.apply(null, rows.map(function (r) { return r.length; }));
+    var padded = rows.map(function (r) {
+      while (r.length < numCols) r.push('');
+      return r;
+    });
+    sheet.getRange(1, 1, padded.length, numCols).setValues(padded);
   }
-
-  const result = {
-    valorizacion: readSheet('♻️ Valorización') || readSheet('Valorización'),
-    trazabilidad: readSheet('📊 Trazabilidad_Docs') || readSheet('Trazabilidad_Docs'),
-    objetivos: readSheet('🎯 Objetivos') || readSheet('Objetivos'),
-    respel: readRespelSheet_(),
-    avance: readAvanceSheet_(),
-    cse: readCseSheet_()
-  };
-
-  return ContentService
-    .createTextOutput(JSON.stringify(result))
-    .setMimeType(ContentService.MimeType.JSON);
 }
