@@ -1143,10 +1143,15 @@ function processData(rows, fname) {
     var key = suc+'||'+mes+'||'+residuo;
     // Para trazabilidad y objetivos solo considerar operaciones finalizadas
     if (estado !== 'finalizada' && estado !== 'finalizado') return;
-    // Excavacion tampoco cuenta para trazabilidad, mismo criterio que el % de
-    // valorizacion (linea 584): en ninguna empresa debe afectar Importaciones/
-    // Documentos/100% trazabilidad/SINADER/KPI costo.
-    if (esExcavacion) return;
+    // Excavacion tampoco cuenta para trazabilidad para el resto de empresas,
+    // mismo criterio que el % de valorizacion (linea 584): no debe afectar
+    // Importaciones/Documentos/100% trazabilidad/SINADER/KPI costo.
+    // EXCEPCION EURO (decision del usuario 2026-08-26): para Euro SI cuenta
+    // como aporte a la trazabilidad (Importaciones/100% trazabilidad), pero
+    // sin exigir transportista ni disposicion final — ver excluirTranspDisp
+    // en calcObjetivos (mismo criterio ya usado para organicos/CDL) y el
+    // mismo criterio en el visor de Euro (index.html: docValor/esExcavacionRes).
+    if (esExcavacion && !esEuro) return;
     // Una operacion de 0 kilos no cuenta para efectos de trazabilidad (no afecta
     // Importaciones/Documentos/100% trazabilidad ni Total Residuos ya la excluye
     // implicitamente al sumar 0). EXCEPCION PMS (decision del usuario 2026-07-30):
@@ -1798,16 +1803,18 @@ function calcObjetivos(anio) {
         if(obj.tipo==='trazabilidad'){
           var docs=emp.trazDocsCompletos;
           var docsExcDon={cert:1,transp:1,disp:1};
-          // Excepciones: orgánicos y CDL no requieren transportista ni disposición final
+          // Excepciones: orgánicos, CDL y Excavación (esta última solo Euro,
+          // ver esExcavacion en processData) no requieren transportista ni
+          // disposición final.
           var esCDL = suc.toLowerCase().indexOf('cdl') === 0;
-          var docsExcEspecial = {transp:1, disp:1}; // docs que se excluyen para orgánicos y CDL
+          var docsExcEspecial = {transp:1, disp:1}; // docs que se excluyen para orgánicos, CDL y Excavación
           // Acciona: Madera no exige disposición final, pero sí transportista
           // (decisión del usuario 2026-07-31, exclusiva de Acciona).
           var docsExcSoloDisp = {disp:1};
           var completas=0;
           trazSM.forEach(function(r){
             var esOrganico = (r.residuo+'').toLowerCase().indexOf('orgán') >= 0 || (r.residuo+'').toLowerCase().indexOf('organico') >= 0;
-            var excluirTranspDisp = esCDL || esOrganico;
+            var excluirTranspDisp = esCDL || esOrganico || normResiduo(r.residuo)==='excavacion';
             var excluirSoloDisp = empresaActual==='acciona' && normResiduo(r.residuo)==='madera';
             var donEnG=rowsFin.filter(function(rr){return rr['Sucursal']===r.suc&&toYM(rr['Fecha de Operacion']||rr['Fecha de Operación']||rr['Fecha de operación']||'')===r.mes&&rr['Residuo']===r.residuo&&rr['Tipo de Tratamiento']==='Donaciones';}).length;
             var allOk=docs.every(function(d){
@@ -1825,7 +1832,7 @@ function calcObjetivos(anio) {
             var okRes=[];
             trazSM.forEach(function(r){
               var esOrganico = (r.residuo+'').toLowerCase().indexOf('orgán') >= 0 || (r.residuo+'').toLowerCase().indexOf('organico') >= 0;
-              var excluirTranspDisp = esCDL || esOrganico;
+              var excluirTranspDisp = esCDL || esOrganico || normResiduo(r.residuo)==='excavacion';
               var excluirSoloDisp = empresaActual==='acciona' && normResiduo(r.residuo)==='madera';
               var donEnG=rowsFin.filter(function(rr){return rr['Sucursal']===r.suc&&toYM(rr['Fecha de Operacion']||rr['Fecha de Operación']||rr['Fecha de operación']||'')===r.mes&&rr['Residuo']===r.residuo&&rr['Tipo de Tratamiento']==='Donaciones';}).length;
               var resOk=docs.every(function(d){

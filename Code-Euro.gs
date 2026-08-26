@@ -33,6 +33,11 @@
  * nuevo (mismo criterio que writeValorizacion/writeTrazabilidad/
  * writeObjetivos), porque el Excel de Euro normalmente trae un solo mes
  * y antes eso borraba el histórico completo de "Total Residuos".
+ *
+ * AGREGADO 2026-08-26 (4): soporte de POST tipo:'m2totales' (writeM2Totales_)
+ * para editar el m² total de cada obra desde el panel "M² Obras" del
+ * visor — actualiza la fila 2 ("m2 totales") de "% de avance", misma
+ * pestaña de donde readAvanceSheet_ ya la exponía por GET.
  * ============================================================
  */
 
@@ -82,6 +87,7 @@ function doPost(e) {
     const data = JSON.parse(e.postData.contents);
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const tipo = data.tipo;
+    let extra = {};
 
     if (tipo === 'valorizacion') writeValorizacion(ss, data);
     else if (tipo === 'valorizacion_metas') writeMetas(ss, data);
@@ -91,9 +97,10 @@ function doPost(e) {
     else if (tipo === 'avance') writeAvance(ss, data);
     else if (tipo === 'minutas') writeMinutaSessions_(data.sessions);
     else if (tipo === 'cse') writeCSE_(ss, data);
+    else if (tipo === 'm2totales') extra = { noEncontradas: writeM2Totales_(ss, data) };
 
     return ContentService
-      .createTextOutput(JSON.stringify({ok: true}))
+      .createTextOutput(JSON.stringify(Object.assign({ok: true}, extra)))
       .setMimeType(ContentService.MimeType.JSON);
   } catch(err) {
     return ContentService
@@ -379,6 +386,34 @@ function writeAvance(ss, data) {
       sheet.getRange(targetRow, col).setValue(fila.valores[mesNombre]);
     });
   });
+}
+
+// Actualiza la fila 2 ("m2 totales") de "% de avance" para las obras que
+// vengan en data.valores ({Sucursal: m2}), agregado 2026-08-26 para que
+// el visor pueda editar el m² total de cada obra desde el panel "M²
+// Obras" (usado por FGR/CO2ev·m²). Solo actualiza columnas que YA existen
+// (Sucursal presente en la fila 1) — no crea columnas nuevas para una
+// obra sin columna todavía; esas se devuelven en el array de retorno para
+// que el visor avise en vez de fallar en silencio.
+function writeM2Totales_(ss, data) {
+  var sheet = ss.getSheetByName('%avance') || ss.getSheetByName('% de avance');
+  if (!sheet) throw new Error('Hoja "% de avance" no encontrada');
+  var lastCol = sheet.getLastColumn();
+  var colBySuc = {};
+  if (lastCol >= 2) {
+    var fila1 = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+    for (var c = 1; c < lastCol; c++) {
+      var suc = String(fila1[c] || '').trim();
+      if (suc) colBySuc[suc] = c + 1;
+    }
+  }
+  var noEncontradas = [];
+  Object.keys(data.valores || {}).forEach(function (suc) {
+    var col = colBySuc[suc];
+    if (!col) { noEncontradas.push(suc); return; }
+    sheet.getRange(2, col).setValue(data.valores[suc]);
+  });
+  return noEncontradas;
 }
 
 // ── "👥 Seguimiento_CSE" (Acompañamiento en terreno, agregado 2026-08-19) ──
