@@ -1692,6 +1692,38 @@ correctamente.
 editor de Apps Script y reimplementar para que `TODAS_OBRAS_FGR` llegue de verdad en el payload
 — mientras tanto la tabla de FGR queda vacía (degradación controlada, sin error).
 
+## Visor de Objetivos: "Todas" solo muestra sucursales con datos en el año elegido (2026-08-28)
+Mismo pedido que se hizo para el visor de Socovesa (`socovesa-trazabilidad`), ahora aplicado a
+`valorizacion-recylink.html`: el selector "Sucursal" del visor de Objetivos (`f-obj-suc`) y la
+opción "Todas" ya no deben listar/mostrar TODAS las sucursales de siempre — solo las que
+efectivamente tienen datos (valorización o trazabilidad) en el año elegido en `f-obj-anio`.
+
+- Nueva `sucursalesConDatosEnAnio(anio)`: revisa `valMatrix[suc]` (¿algún mesKey empieza con
+  ese año?) y `trazRows` (¿algún registro de ese suc es de ese año?); sin año, devuelve todas
+  (comportamiento de siempre). Colocada junto a `isSucExcluida`.
+- Los 2 lugares que arman el filtro inicial de sucursal (`processData()` para Excel recién
+  subido, `loadFromSheets()`→`loadSheetsData()` para datos ya sincronizados) ahora calculan
+  primero el año por defecto (el más reciente) y populan `f-obj-suc` ya filtrado a ese año, en
+  vez de listar todas y filtrar después.
+- Nueva `refreshObjSucOptions()` (mismo patrón que ya existía `refreshObjMesOptions()` para el
+  mes): repuebla `f-obj-suc` cada vez que cambia `f-obj-anio`, reseteando a "Todas" — igual
+  criterio que ya usaba el selector de mes al cambiar de año.
+- `renderCopecObjetivos()`: cuando el filtro de sucursal está en "Todas" (`fS==='all'`),
+  `sucsToShow` ahora es `sucursalesConDatosEnAnio(fA)` en vez de la lista completa de
+  sucursales — así la vista en sí (no solo el dropdown) deja de mostrar tarjetas de sucursales
+  sin ningún dato ese año.
+- **Limitación conocida, documentada en el código**: si una sucursal SOLO tiene fila en la hoja
+  `🎯 Objetivos` (sin nada en Valorización/Trazabilidad_Docs), no hay forma genérica de saber a
+  qué año pertenece esa fila para todas las empresas (solo Euro/Socovesa tienen columna Año en
+  esa hoja) — ese caso extremo queda igual excluido salvo que la sucursal tenga datos en otra
+  hoja para ese año. No se intentó resolver por ser un caso raro y agregar mucha complejidad
+  específica por empresa para poco beneficio.
+
+Probado en vivo con Euro (3 años disponibles: 2024/2025/2026): con 2026 seleccionado aparecen
+las 9 sucursales de siempre; al cambiar a 2024, tanto el dropdown como la vista renderizada
+quedan con una sola sucursal ("Proyecto Departamental", la única con datos ese año); al volver
+a 2026, las 9 reaparecen.
+
 ## Cómo verificar sintaxis JS del archivo
 El HTML es un solo archivo con `<script>...</script>` embebido. Para validar sintaxis:
 ```bash

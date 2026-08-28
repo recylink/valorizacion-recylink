@@ -938,6 +938,24 @@ function isSucExcluida(suc) {
   return getSucursalesExcluidasUI().indexOf(suc) >= 0;
 }
 
+// Sucursales que efectivamente tienen datos (valorización o trazabilidad)
+// en un año puntual — para el filtro de Año del visor de Objetivos, a
+// pedido del usuario: no listar/mostrar sucursales cuyo único histórico es
+// de otro año. Si no se pasa año, devuelve todas (sin filtrar).
+function sucursalesConDatosEnAnio(anio) {
+  var base = sucursales.filter(function(s){ return !isSucExcluida(s); });
+  if (!anio) return base;
+  var conDatos = {};
+  Object.keys(valMatrix).forEach(function(suc){
+    var meses = valMatrix[suc] || {};
+    if (Object.keys(meses).some(function(mk){ return mk.slice(0,4) === anio; })) conDatos[suc] = true;
+  });
+  trazRows.forEach(function(r){
+    if (r.mes && r.mes.slice(0,4) === anio) conDatos[r.suc] = true;
+  });
+  return base.filter(function(s){ return conDatos[s]; });
+}
+
 // Objetivos "dormidos" (desactivados) para una sucursal puntual: dejan de
 // mostrarse en la tabla y de contar en el % de salud de esa sucursal, sin
 // afectar al resto de sucursales ni a otras empresas. localStorage, por
@@ -1005,6 +1023,14 @@ function refreshObjMesOptions() {
   var mesesAnio = mesesDisp.filter(function(m){ return m.slice(0,4)===fA; });
   var mesItemsAnio = mesesAnio.map(function(m){ return {v:m, l:MES_L[parseInt(m.slice(5))-1]}; });
   populateSel('f-obj-mes', mesItemsAnio, 'Todos');
+}
+
+// Repuebla el filtro de sucursal del visor de Objetivos con solo las que
+// tienen datos en el año elegido (f-obj-anio) — se llama al cambiar de año,
+// mismo criterio que ya usa refreshObjMesOptions() para el mes.
+function refreshObjSucOptions() {
+  var fA = document.getElementById('f-obj-anio').value;
+  populateSel('f-obj-suc', sucursalesConDatosEnAnio(fA), 'Todas');
 }
 
 // Tabs
@@ -1239,11 +1265,13 @@ function processData(rows, fname) {
   populateSel('f-mes', mesItems, 'Todos');
   populateSel('f-traz-suc', sucursales, 'Todas');
   populateSel('f-traz-mes', mesItems, 'Todos');
-  var sucObj = sucursales.filter(function(s){ return !isSucExcluida(s); });
-  populateSel('f-obj-suc', sucObj, 'Todas');
   var aniosDisp = Array.from(new Set(mesesDisp.map(function(m){ return m.slice(0,4); }))).sort();
   populateSel('f-obj-anio', aniosDisp, null);
-  if (aniosDisp.length) document.getElementById('f-obj-anio').value = aniosDisp[aniosDisp.length-1];
+  var anioDefault = aniosDisp.length ? aniosDisp[aniosDisp.length-1] : null;
+  if (anioDefault) document.getElementById('f-obj-anio').value = anioDefault;
+  // Sucursal del visor de Objetivos: solo las que tienen datos en el año
+  // por defecto (el más reciente) — no todas las sucursales de siempre.
+  populateSel('f-obj-suc', sucursalesConDatosEnAnio(anioDefault), 'Todas');
   refreshObjMesOptions();
 
   document.getElementById('empresa-sub').textContent=EMPRESAS[empresaActual].nombre+' - '+rows.length+' operaciones - '+sucursales.length+' sucursales';
@@ -2180,6 +2208,7 @@ document.getElementById('f-obj-suc').addEventListener('change', function() {
 });
 document.getElementById('f-obj-anio').addEventListener('change', function() {
   refreshObjMesOptions();
+  refreshObjSucOptions();
   renderCopecObjetivos();
 });
 document.getElementById('f-obj-mes').addEventListener('change', function() {
@@ -2425,10 +2454,18 @@ function loadSheetsData(data) {
     var sucObjFromSheet = Object.keys(sucObjSet).sort();
     if (sucObjFromSheet.length > 0) sucObj = sucObjFromSheet;
   }
-  populateSel('f-obj-suc', sucObj, 'Todas');
   var aniosDisp = Array.from(new Set(mesesDisp.map(function(m){ return m.slice(0,4); }))).sort();
   populateSel('f-obj-anio', aniosDisp, null);
-  if (aniosDisp.length) document.getElementById('f-obj-anio').value = aniosDisp[aniosDisp.length-1];
+  var anioDefault = aniosDisp.length ? aniosDisp[aniosDisp.length-1] : null;
+  if (anioDefault) document.getElementById('f-obj-anio').value = anioDefault;
+  // Solo sucursales con datos (valorizacion/trazabilidad) en el año por
+  // defecto — no todas las sucursales de siempre. Nota: si una sucursal
+  // SOLO tiene fila en la hoja Objetivos (sin valorizacion/trazabilidad),
+  // no hay forma generica de saber a que año pertenece esa fila (no todas
+  // las empresas tienen columna Año en Objetivos), asi que queda igual
+  // excluida salvo que tenga datos en otras hojas para ese año.
+  var sucConDatosAnio = sucursalesConDatosEnAnio(anioDefault);
+  populateSel('f-obj-suc', sucObj.filter(function(s){ return sucConDatosAnio.indexOf(s) >= 0; }), 'Todas');
   refreshObjMesOptions();
 
   document.getElementById('empresa-sub').textContent = emp.nombre + ' - cargado desde Sheets - ' + sucursales.length + ' sucursales';
@@ -2586,7 +2623,9 @@ function renderCopecObjetivos() {
   grid.innerHTML = '';
   var emp = EMPRESAS[empresaActual];
   var metas = empresaActual === 'copec' ? getCopecMetas() : (empresaActual === 'acciona' ? getAccionaMetas() : (empresaActual === 'abastible' ? ABASTIBLE_METAS : (empresaActual === 'pms' ? getPmsMetas() : (empresaActual === 'ccu' ? CCU_METAS : ((empresaActual === 'gespania' || empresaActual === 'salfa' || empresaActual === 'euro' || empresaActual === 'ando') ? metasFromSheets : {})))));
-  var sucsToShow = fS === 'all' ? sucursales.filter(function(s){ return !isSucExcluida(s); }) : [fS];
+  // "Todas" = solo las sucursales con datos en el año elegido (fA), no
+  // todas las sucursales de siempre — a pedido del usuario.
+  var sucsToShow = fS === 'all' ? sucursalesConDatosEnAnio(fA) : [fS];
   var mesesAnio = mesesDisp.filter(function(m){ return m.slice(0,4)===fA; });
   var mesesToShow = fM === 'all' ? mesesAnio : [fM];
 
