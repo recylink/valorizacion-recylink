@@ -1509,6 +1509,50 @@ No se pudo reverificar visualmente en el navegador (entorno de automatización i
 momento del cambio) — la sintaxis quedó validada con `node --check` y la lógica reutiliza
 exactamente el mismo camino que ya procesaba un solo archivo.
 
+## Pestaña FGR en el visor de trazabilidad de Socovesa (agregado 2026-08-28)
+A pedido del usuario, se agregó una pestaña "FGR" al **otro** visor de Socovesa — el
+"visor legado de Trazabilidad" (`index.html`, repo separado
+`https://github.com/recylink/socovesa-trazabilidad`, publicado en
+`https://recylink.github.io/socovesa-trazabilidad/`), NO a `valorizacion-recylink.html`. Ese
+repo se clonó localmente en `C:\Users\PC\Desktop\socovesa-trazabilidad` para poder editarlo —
+no existía una copia local antes. Consume el mismo Apps Script que `EMPRESAS.socovesa` (mismo
+`DATA_SOURCE_URL`), pero vía `?visor=1&callback=X` (JSONP) en vez de la request simple que usa
+`valorizacion-recylink.html`.
+
+Columnas pedidas: obra, fecha del primer y último registro de residuos, total m3, m2
+construidos y FGR. Fuentes de cada dato:
+- **Obra**: `emp.sucursal` (ya disponible).
+- **Total m3 + primer/último registro**: **NUEVO**, requirió tocar el backend
+  (`Code-Socovesa.gs`, en este repo) — se agregó `leerTotalResiduos_()`, que lee la hoja
+  "Total Residuos" (recién habilitada para Socovesa el mismo día, ver sección más arriba) y
+  suma el Total M3 por obra + arma el mes/año más antiguo y más reciente con registro. Se
+  expone en el payload de `?visor=1` como `emp.fgr = {totalM3, primerRegistro, ultimoRegistro}`.
+  Solo tiene granularidad de mes (no día exacto) porque esa es la granularidad de "Total
+  Residuos" — no hay fecha exacta de transacción guardada en ningún Sheet server-side (el
+  Excel original con fechas puntuales nunca se sube ni se guarda ahí, solo se procesa
+  transitoriamente en el navegador al sincronizar).
+- **M2 construidos**: no existe ninguna hoja fuente para este dato hoy. Se implementó como
+  campo **editable directamente en la pestaña FGR**, guardado en `localStorage` del navegador
+  (`FGR_M2_STORE`, clave `socovesa_fgr_m2_construidos`, por obra) — mismo patrón que ya usa
+  este visor para las descripciones de "Pendientes" (`PENDIENTES_STORE`, aunque esa ni siquiera
+  usa localStorage) y la config de Minutas. Es decir: es un dato manual, por navegador, NO
+  compartido entre computadores ni sincronizado a ningún Sheet. Si más adelante se necesita que
+  sea compartido/persistente de verdad, habría que agregarle una hoja propia + soporte de
+  lectura/escritura en el Apps Script (mismo patrón que "% de avance" de Euro).
+- **FGR**: calculado en el navegador, `totalM3 / m2Construidos`, redondeado a 3 decimales.
+  `—` si falta cualquiera de los dos datos.
+
+**Pendiente de acción del usuario**: el `Code-Socovesa.gs` actualizado con `leerTotalResiduos_()`
+está en el repo pero el Apps Script real desplegado NO se actualiza solo — hay que copiar el
+contenido de `Code-Socovesa.gs` al editor de Apps Script de Socovesa y volver a "Implementar"
+(nueva versión) para que Total M3 y las fechas de registro dejen de mostrarse vacías en la
+pestaña FGR. Mientras tanto la pestaña se ve igual pero con esos 2 campos en "—" (sin error,
+degradación controlada).
+
+Probado en vivo sirviendo el repo localmente (`python -m http.server`) contra el Apps Script
+real: la pestaña aparece, el input+botón de m2 construidos guarda y persiste tras recargar, y
+el cálculo de FGR (simulando un `emp.fgr` de prueba) da el resultado esperado.
+
 ## Cómo verificar sintaxis JS del archivo
 El HTML es un solo archivo con `<script>...</script>` embebido. Para validar sintaxis:
 ```bash

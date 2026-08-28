@@ -386,7 +386,8 @@ function buildPayload_() {
   var cse   = leerCSE_(empIdsValidos);
   var objetivosPorEmpresa = leerObjetivos_();
   var objetivosMaestro = leerObjetivosMaestro_();
-  var empresas = construirEmpresas_(traza, val, cse, objetivosPorEmpresa, objetivosMaestro);
+  var totalResiduosPorEmpresa = leerTotalResiduos_(); // NUEVO — pestaña FGR del visor
+  var empresas = construirEmpresas_(traza, val, cse, objetivosPorEmpresa, objetivosMaestro, totalResiduosPorEmpresa);
   var mesesActivos = calcularMesesActivos_(traza, val, cse);
 
   return {
@@ -666,10 +667,56 @@ function leerObjetivosMaestro_() {
   return [];
 }
 
+// ── NUEVO (pestaña FGR del visor): lectura de la hoja "Total Residuos"
+// (Sucursal|Año|Mes|Residuo|Valorizado/No Valorizado|Respel no respel|
+// Total KG|Total M3|Tons. CO2eq. evitadas) para sumar el total de m3
+// registrados por obra y encontrar el mes+año del primer y ultimo registro
+// de residuos. El FGR en si (m3/m2 construidos) NO se calcula aca — el
+// visor lo calcula en el navegador, porque los m2 construidos son un dato
+// manual que hoy no vive en ningun Sheet.
+function leerTotalResiduos_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Total Residuos');
+  if (!sheet) return {};
+  var headerRow = buscarFilaEncabezado_(sheet, 'Sucursal');
+  if (!headerRow) return {};
+  var lastRow = sheet.getLastRow();
+  var lastCol = sheet.getLastColumn();
+  if (lastRow < headerRow + 1) return {};
+
+  var headers = sheet.getRange(headerRow, 1, 1, lastCol).getValues()[0]
+    .map(function (h) { return String(h || '').trim(); });
+  var idxSuc = headers.indexOf('Sucursal');
+  var idxAnio = headers.indexOf('Año');
+  var idxMes = headers.indexOf('Mes');
+  var idxM3 = headers.indexOf('Total M3');
+  if (idxSuc === -1 || idxM3 === -1) return {};
+
+  var data = sheet.getRange(headerRow + 1, 1, lastRow - headerRow, lastCol).getValues();
+  var result = {};
+  data.forEach(function (r) {
+    var suc = String(r[idxSuc] || '').trim();
+    if (!suc) return;
+    var empId = normalizarSucursal_(suc);
+    if (!result[empId]) result[empId] = { totalM3: 0, registros: [] };
+
+    var m3 = parseFloat(r[idxM3]) || 0;
+    result[empId].totalM3 += m3;
+
+    var anio = idxAnio === -1 ? '' : String(r[idxAnio] || '').trim();
+    var mesNorm = idxMes === -1 ? '' : normalizarMes_(r[idxMes]);
+    var idxMesNum = mesNorm ? MESES.indexOf(mesNorm) : -1;
+    if (anio && idxMesNum !== -1) {
+      result[empId].registros.push({ anio: anio, mes: mesNorm, orden: parseInt(anio, 10) * 100 + (idxMesNum + 1) });
+    }
+  });
+  return result;
+}
+
 
 // ── Construcción del modelo para el visor ──
 
-function construirEmpresas_(traza, val, cse, objetivosPorEmpresa, objetivosMaestro) {
+function construirEmpresas_(traza, val, cse, objetivosPorEmpresa, objetivosMaestro, totalResiduosPorEmpresa) {
   var empresas = [];
 
   Object.keys(traza.sucursales).sort().forEach(function (empId) {
@@ -750,6 +797,13 @@ function construirEmpresas_(traza, val, cse, objetivosPorEmpresa, objetivosMaest
     var cseInfo = cse.cseData[empId] || { correo: {}, reunion: {}, encuesta: {}, fechas: {} };
     var anualInfo = cse.anualData[empId] || {};
 
+    // FGR: total m3 + fecha (mes+año) del primer y ultimo registro de
+    // residuos, desde "Total Residuos". Sin registros = null en ambos.
+    var trInfo = (totalResiduosPorEmpresa || {})[empId] || { totalM3: 0, registros: [] };
+    var registrosOrdenados = trInfo.registros.slice().sort(function (a, b) { return a.orden - b.orden; });
+    var primerReg = registrosOrdenados[0] || null;
+    var ultimoReg = registrosOrdenados[registrosOrdenados.length - 1] || null;
+
     empresas.push({
       id: empId,
       nombre: EMPRESA_NOMBRE,
@@ -761,7 +815,12 @@ function construirEmpresas_(traza, val, cse, objetivosPorEmpresa, objetivosMaest
       objetivos: objetivos,
       cse: cseInfo,
       mensual: mensual,
-      anual: anualInfo
+      anual: anualInfo,
+      fgr: {
+        totalM3: Math.round(trInfo.totalM3 * 100) / 100,
+        primerRegistro: primerReg ? (primerReg.mes + ' ' + primerReg.anio) : null,
+        ultimoRegistro: ultimoReg ? (ultimoReg.mes + ' ' + ultimoReg.anio) : null
+      }
     });
   });
 
