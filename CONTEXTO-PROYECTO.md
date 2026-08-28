@@ -1496,6 +1496,19 @@ Trazabilidad_Docs**, con un efecto en cascada mucho peor:
   filas por empresa_id+mes exacto e inserta las correctas). Recomendado avisarle al usuario que
   re-suba los Excel de los meses ya sincronizados para Socovesa.
 
+## Carga de varios Excel a la vez (agregado 2026-08-28)
+A pedido del usuario: el input "↑ Cargar Excel" ahora acepta seleccionar varios archivos de
+una vez (atributo `multiple`). El listener de `change` lee todos con `FileReader` en paralelo
+(`Promise.all`), junta las filas de todos en un solo arreglo (`[].concat.apply([], ...)`) y
+llama a `processData()` una sola vez con el total combinado — se procesan exactamente como si
+fuera un único Excel consolidado, mismo criterio que ya usa el resto del sistema (todo el
+sistema opera sobre `rawRows` completo, sin distinguir de qué archivo vino cada fila). Antes,
+cargar un segundo Excel pisaba (`rawRows = rows`) los datos del primero en vez de sumarlos.
+Si falla la lectura de alguno de los archivos, se corta con un toast de error indicando cuál.
+No se pudo reverificar visualmente en el navegador (entorno de automatización inestable en el
+momento del cambio) — la sintaxis quedó validada con `node --check` y la lógica reutiliza
+exactamente el mismo camino que ya procesaba un solo archivo.
+
 ## Cómo verificar sintaxis JS del archivo
 El HTML es un solo archivo con `<script>...</script>` embebido. Para validar sintaxis:
 ```bash
