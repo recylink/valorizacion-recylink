@@ -360,7 +360,8 @@ var COMENTARIO_HEADERS_CANDIDATOS = ["Comentario por sucursal", "Comentarios", "
 function doGetVisor_(e) {
   var payload;
   try {
-    payload = buildPayload_();
+    var anioParam = e && e.parameter && e.parameter.anio;
+    payload = buildPayload_(anioParam);
   } catch (err) {
     payload = { error: true, message: String(err) };
   }
@@ -376,17 +377,35 @@ function doGetVisor_(e) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-function buildPayload_() {
-  var traza = leerTrazabilidad_();
-  var val   = leerValorizacion_();
+// FIX (2026-08-28): el visor asumia que TODA la informacion era de un solo
+// año ("2026" hardcodeado en el frontend) — los lectores de Trazabilidad,
+// Valorizacion y Objetivos nunca miraban la columna Año, asi que filas del
+// mismo mes de años distintos (ej. "Enero 2023" y "Enero 2024") se
+// mezclaban/pisaban entre si en el mismo balde de mes. Ahora buildPayload_
+// recibe (opcionalmente) el año pedido por el visor (?anio=2023) y filtra
+// Trazabilidad/Valorizacion/Objetivos-mensuales a ESE año exacto — mismo
+// dato de siempre, pero sin mezclar años. Las obras (sucursales) igual se
+// listan todas independiente del año elegido (ver leerTrazabilidad_). Las
+// filas "Anual" de Objetivos NO se filtran por año (reflejan el estado
+// actual, sin Año, igual que ya lo maneja valorizacion-recylink.html). El
+// total m3 / fechas de la pestaña FGR (leerTotalResiduos_) tampoco se
+// filtran — son historicos acumulados a proposito.
+function buildPayload_(anioParam) {
+  var aniosDisponibles = listarAniosDisponibles_();
+  var anioSeleccionado = (anioParam && aniosDisponibles.indexOf(String(anioParam)) !== -1)
+    ? String(anioParam)
+    : aniosDisponibles[aniosDisponibles.length - 1];
+
+  var traza = leerTrazabilidad_(anioSeleccionado);
+  var val   = leerValorizacion_(anioSeleccionado);
 
   var empIdsValidos = {};
   Object.keys(traza.sucursales).forEach(function (empId) { empIdsValidos[empId] = true; });
 
   var cse   = leerCSE_(empIdsValidos);
-  var objetivosPorEmpresa = leerObjetivos_();
+  var objetivosPorEmpresa = leerObjetivos_(anioSeleccionado);
   var objetivosMaestro = leerObjetivosMaestro_();
-  var totalResiduosPorEmpresa = leerTotalResiduos_(); // NUEVO — pestaña FGR del visor
+  var totalResiduosPorEmpresa = leerTotalResiduos_(); // pestaña FGR — historico, no se filtra por año
   var empresas = construirEmpresas_(traza, val, cse, objetivosPorEmpresa, objetivosMaestro, totalResiduosPorEmpresa);
   var mesesActivos = calcularMesesActivos_(traza, val, cse);
 
@@ -396,6 +415,8 @@ function buildPayload_() {
     EMPRESA_COLOR: EMPRESA_COLOR,
     EMPRESA_COLOR_L: EMPRESA_COLOR_L,
     MESES_ACTIVOS: mesesActivos,
+    ANIOS_DISPONIBLES: aniosDisponibles,
+    ANIO_SELECCIONADO: anioSeleccionado,
     EMPRESAS: empresas,
     VAL_DATA: val
   };
@@ -430,11 +451,40 @@ function getSheetRows_(candidatos) {
   return { header: header, rows: rows };
 }
 
-function leerTrazabilidad_() {
+// Escanea la columna "Año" de Trazabilidad_Docs/Valorización/Objetivos y
+// devuelve la lista de años con datos, ordenada ascendente (["2021",
+// "2022", ...]). Si ninguna fila tiene Año (Sheet viejo, sin esa columna
+// todavia), devuelve el año actual como unica opcion.
+function listarAniosDisponibles_() {
+  var anios = {};
+  function escanear(candidatos) {
+    var sr;
+    try { sr = getSheetRows_(candidatos); } catch (err) { return; }
+    var idxAnio = sr.header.indexOf('Año');
+    if (idxAnio === -1) return;
+    sr.rows.forEach(function (r) {
+      var a = String(r[idxAnio] || '').trim();
+      if (a) anios[a] = true;
+    });
+  }
+  escanear(SHEET_TRAZA_CANDIDATOS);
+  escanear(SHEET_VAL_CANDIDATOS);
+  escanear(SHEET_OBJ_CANDIDATOS);
+  var lista = Object.keys(anios).sort();
+  return lista.length ? lista : [String(new Date().getFullYear())];
+}
+
+// targetAnio: si se pasa, filtra las filas mensuales a ese año exacto
+// (fila sin Año = se asume del año actual, mismo criterio que
+// valorizacion-recylink.html). Las obras (sucursales) se listan TODAS
+// independiente del año elegido, para que el sidebar no "pierda" obras
+// cuyo unico historico sea de otro año.
+function leerTrazabilidad_(targetAnio) {
   var sr = getSheetRows_(SHEET_TRAZA_CANDIDATOS);
   var h = sr.header;
   var idxSuc = h.indexOf("Sucursal");
   var idxMes = h.indexOf("Mes");
+  var idxAnio = h.indexOf("Año");
   var idxRes = h.indexOf("Residuo");
   var idxImp = h.indexOf("Importaciones");
   var docIdx = DOC_COLS.map(function (c) { return h.lastIndexOf(c); });
@@ -456,6 +506,10 @@ function leerTrazabilidad_() {
     if (!mes || !residuo) return;
 
     sucursales[empId] = suc;
+
+    var anioFila = idxAnio === -1 ? "" : String(r[idxAnio] || "").trim();
+    if (!anioFila) anioFila = String(new Date().getFullYear());
+    if (targetAnio && anioFila !== targetAnio) return;
 
     var docs = {};
     DOC_COLS.forEach(function (c, i) {
@@ -484,11 +538,12 @@ function leerTrazabilidad_() {
   return { sucursales: sucursales, porEmpresaMes: porEmpresaMes, comentarios: comentariosPorEmpresaMes };
 }
 
-function leerValorizacion_() {
+function leerValorizacion_(targetAnio) {
   var sr = getSheetRows_(SHEET_VAL_CANDIDATOS);
   var h = sr.header;
   var idxSuc = h.indexOf("Sucursal");
   var idxTipo = h.indexOf("Tipo");
+  var idxAnio = h.indexOf("Año");
   var mesIdx = MESES.map(function (m) { return h.indexOf(m); });
 
   var valData = {};
@@ -498,6 +553,10 @@ function leerValorizacion_() {
     if (!suc) return;
     var empId = normalizarSucursal_(suc);
     var tipo = String(r[idxTipo] || "").trim().toLowerCase();
+
+    var anioFila = idxAnio === -1 ? "" : String(r[idxAnio] || "").trim();
+    if (!anioFila) anioFila = String(new Date().getFullYear());
+    if (targetAnio && anioFila !== targetAnio) return;
 
     valData[empId] = valData[empId] || { meses: {}, meta: {}, acumulado: {} };
 
@@ -573,7 +632,11 @@ function leerCSE_(empIdsValidos) {
 //   fijos según "OK"/"No").
 // - Filas mensuales (sin fila Anual para ese texto) usan el % de la última
 //   fila mensual disponible (más reciente), igual que hace el visor legado.
-function leerObjetivos_() {
+// targetAnio: filtra las filas MENSUALES a ese año exacto (fila sin Año se
+// asume del año actual). Las filas "Anual" NUNCA se filtran por año — son
+// year-agnostic por diseño en todo el sistema (siempre reflejan el estado
+// "actual", se sincronizan sin Año desde valorizacion-recylink.html).
+function leerObjetivos_(targetAnio) {
   var sr;
   try {
     sr = getSheetRows_(SHEET_OBJ_CANDIDATOS);
@@ -583,6 +646,7 @@ function leerObjetivos_() {
   var h = sr.header;
   var idxSuc = h.indexOf("Sucursal");
   var idxMes = h.indexOf("Mes");
+  var idxAnio = h.indexOf("Año");
   var idxObj = h.indexOf("Objetivo");
   var idxPct = h.indexOf("% cumplimiento");
   var idxDet = h.indexOf("Detalle");
@@ -596,6 +660,13 @@ function leerObjetivos_() {
     var mes = String(r[idxMes] || "").trim();
     var texto = String(r[idxObj] || "").trim();
     if (!texto) return;
+
+    if (mes.toLowerCase() !== "anual") {
+      var anioFila = idxAnio === -1 ? "" : String(r[idxAnio] || "").trim();
+      if (!anioFila) anioFila = String(new Date().getFullYear());
+      if (targetAnio && anioFila !== targetAnio) return;
+    }
+
     var valorRaw = idxPct === -1 ? null : r[idxPct];
     var detalle = idxDet === -1 ? "" : String(r[idxDet] || "").trim();
 

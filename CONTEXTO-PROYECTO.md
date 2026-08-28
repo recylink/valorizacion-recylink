@@ -1553,6 +1553,57 @@ Probado en vivo sirviendo el repo localmente (`python -m http.server`) contra el
 real: la pestaña aparece, el input+botón de m2 construidos guarda y persiste tras recargar, y
 el cálculo de FGR (simulando un `emp.fgr` de prueba) da el resultado esperado.
 
+## Selector de Año en el visor de trazabilidad de Socovesa (agregado 2026-08-28)
+El usuario notó que "el visor asume que toda la información corresponde al 2026, cuando es de
+varios años". Causa real (mismo repo separado `socovesa-trazabilidad`, no
+`valorizacion-recylink.html`): las 3 funciones que arman el payload del visor
+(`leerTrazabilidad_`, `leerValorizacion_`, `leerObjetivos_` en `Code-Socovesa.gs`) nunca leían
+la columna **Año** — indexaban todo por nombre de mes nada más, así que filas del mismo mes de
+años distintos (ej. "Enero 2023" y "Enero 2024") se mezclaban/pisaban en el mismo balde. Además
+el frontend tenía "2026" hardcodeado en ~15 lugares (títulos, exportaciones, selector de mes).
+
+Se le preguntó al usuario qué enfoque prefería (selector de año completo vs. mostrar solo el
+año más reciente) — eligió el selector completo. Implementado como:
+
+- **Backend (`Code-Socovesa.gs`)**: nueva `listarAniosDisponibles_()` que escanea la columna
+  Año de Trazabilidad_Docs/Valorización/Objetivos y devuelve la lista ordenada de años con
+  datos. `buildPayload_(anioParam)` ahora recibe el año pedido (`?anio=2023` en la URL),
+  valida que exista en `listarAniosDisponibles_()` (si no, usa el más reciente), y se lo pasa a
+  `leerTrazabilidad_`/`leerValorizacion_`/`leerObjetivos_` — las 3 ahora filtran sus filas
+  MENSUALES a ese año exacto (fila sin Año = se asume del año actual, mismo criterio que
+  `valorizacion-recylink.html`). Las sucursales/obras se siguen listando TODAS sin importar el
+  año elegido (si no, una obra sin datos en el año seleccionado desaparecería del sidebar). Las
+  filas "Anual" de Objetivos NO se filtran por año — son year-agnostic por diseño en todo el
+  sistema (reflejan el "estado actual", se sincronizan sin Año). El total m3/fechas de la
+  pestaña FGR (`leerTotalResiduos_`) tampoco se filtran — son históricos acumulados a
+  propósito. El payload ahora incluye `ANIOS_DISPONIBLES` y `ANIO_SELECCIONADO`.
+- **Frontend (`index.html`)**: nuevo selector de Año en la topbar (`#selAnio`, junto al de
+  mes). Cambiar de año llama a `setAnio()`, que dispara un **refetch completo**
+  (`cargarDatos()` con `&anio=X` en la URL) en vez de filtrar en el navegador — no se puede
+  filtrar client-side porque el payload que llega ya viene con un solo año mezclado por balde
+  de mes; hay que pedirle al backend que rearme todo para ese año. `cargarDatos()` guarda
+  `payload.ANIOS_DISPONIBLES`/`ANIO_SELECCIONADO` en globals y repuebla el selector. Se
+  reemplazaron los ~13 "2026" hardcodeados relevantes (títulos de tarjetas, nombres de archivo
+  exportado, títulos de informes impresos) por `${anioSeleccionado}` — se dejaron sin tocar las
+  2 menciones a la pestaña del Sheet literalmente llamada "Objetivos 2026" (nombre propio, no
+  una fecha) y el comentario de ejemplo de formato de fecha de PMS.
+- **No cubierto a propósito**: Seguimiento_CSE (`leerCSE_`) no tiene columna Año en el Sheet y
+  no se tocó — si más adelante se necesita, habría que agregarle esa columna igual que a las
+  otras 3 hojas.
+
+**Pendiente de acción del usuario (de nuevo)**: como con el fix de FGR, el `Code-Socovesa.gs`
+actualizado está en el repo pero el Apps Script real todavía tiene la versión SIN el selector
+de año desplegada (confirmado con `curl` en vivo: el payload actual no trae
+`ANIOS_DISPONIBLES`/`ANIO_SELECCIONADO` todavía). Hay que volver a copiar `Code-Socovesa.gs` al
+editor de Apps Script y reimplementar para que el selector de año funcione de verdad — mientras
+tanto el selector se ve pero queda vacío (degradación controlada, sin error, verificado en
+vivo).
+
+Verificado en vivo (sirviendo el repo localmente): con el backend viejo la página carga sin
+errores y el selector queda vacío como se espera; simulando un payload con años, el selector se
+puebla y queda seleccionado el correcto, y `cargarDatos()` arma la URL con `&anio=X`
+correctamente al cambiar de año.
+
 ## Cómo verificar sintaxis JS del archivo
 El HTML es un solo archivo con `<script>...</script>` embebido. Para validar sintaxis:
 ```bash
