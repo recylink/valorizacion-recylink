@@ -1658,6 +1658,40 @@ cambio desplegado.
 editor de Apps Script y reimplementar para que el sidebar/FGR reales empiecen a excluir las
 obras sin datos del año seleccionado.
 
+## FGR debe mostrar TODAS las obras sin importar el año del sidebar (2026-08-28)
+El usuario aclaró: el sidebar sí debe filtrarse por año (fix anterior), pero la pestaña FGR
+debe seguir mostrando TODAS las obras sin importar qué año esté seleccionado — tiene sentido,
+ya que el FGR usa el histórico completo de "Total Residuos" (`leerTotalResiduos_()`, que nunca
+se filtró por año) y no un recorte anual.
+
+El problema: `renderFGR()` leía de `EMPRESAS`, que es exactamente el arreglo que el fix anterior
+dejó filtrado por año (para el sidebar). Al filtrar el sidebar, sin querer también se filtraba
+la tabla comparativa de FGR.
+
+Solución — separar ambas fuentes en el backend:
+- `leerTrazabilidad_()` ahora devuelve DOS mapas de sucursales: `sucursales` (filtrado por año,
+  sigue alimentando `EMPRESAS`/sidebar, sin cambios) y `todasLasSucursales` (TODAS las obras,
+  construido ANTES de aplicar el filtro de año, o sea el comportamiento que tenía el sidebar
+  originalmente).
+- Nuevo helper `construirFgrInfo_(empId, totalResiduosPorEmpresa)` — se sacó la lógica de armar
+  `{totalM3, primerRegistro, ultimoRegistro}` que antes vivía inline dentro de
+  `construirEmpresas_()`, para poder reusarla en dos lugares sin duplicar código.
+- `buildPayload_()` arma un array nuevo e independiente, `TODAS_OBRAS_FGR` (a partir de
+  `traza.todasLasSucursales`, sin filtro de año), con `{id, sucursal, fgr}` por obra — se manda
+  en el payload junto a `EMPRESAS` (que sigue filtrado).
+- Frontend: nuevo global `TODAS_OBRAS_FGR`, poblado en `cargarDatos()` igual que
+  `ANIOS_DISPONIBLES`. `renderFGR()` ahora itera `TODAS_OBRAS_FGR` en vez de `EMPRESAS` — el
+  resto de la función no cambió (solo usaba `.id`/`.sucursal`, presentes en ambos formatos).
+
+Probado en vivo: contra el backend real (ya con el fix de sidebar-por-año desplegado, `EMPRESAS`
+trae 12 obras para el año actual), simulando `TODAS_OBRAS_FGR` con 53 obras la tabla de FGR las
+muestra las 53 mientras el sidebar se mantiene en 12 — confirma que quedaron desacopladas
+correctamente.
+
+**Pendiente de acción del usuario (otra vez más)**: falta volver a copiar `Code-Socovesa.gs` al
+editor de Apps Script y reimplementar para que `TODAS_OBRAS_FGR` llegue de verdad en el payload
+— mientras tanto la tabla de FGR queda vacía (degradación controlada, sin error).
+
 ## Cómo verificar sintaxis JS del archivo
 El HTML es un solo archivo con `<script>...</script>` embebido. Para validar sintaxis:
 ```bash

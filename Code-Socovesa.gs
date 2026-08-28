@@ -409,6 +409,18 @@ function buildPayload_(anioParam) {
   var empresas = construirEmpresas_(traza, val, cse, objetivosPorEmpresa, objetivosMaestro, totalResiduosPorEmpresa);
   var mesesActivos = calcularMesesActivos_(traza, val, cse);
 
+  // FGR (a pedido del usuario, 2026-08-28): la tabla comparativa debe
+  // mostrar TODAS las obras sin importar el año seleccionado, aunque el
+  // sidebar (EMPRESAS) SI este filtrado por año — se arma por separado a
+  // partir de traza.todasLasSucursales (sin filtro de año).
+  var todasLasObrasFgr = Object.keys(traza.todasLasSucursales).sort().map(function (empId) {
+    return {
+      id: empId,
+      sucursal: traza.todasLasSucursales[empId],
+      fgr: construirFgrInfo_(empId, totalResiduosPorEmpresa)
+    };
+  });
+
   return {
     generatedAt: new Date().toISOString(),
     EMPRESA_NOMBRE: EMPRESA_NOMBRE,
@@ -418,6 +430,7 @@ function buildPayload_(anioParam) {
     ANIOS_DISPONIBLES: aniosDisponibles,
     ANIO_SELECCIONADO: anioSeleccionado,
     EMPRESAS: empresas,
+    TODAS_OBRAS_FGR: todasLasObrasFgr,
     VAL_DATA: val
   };
 }
@@ -493,7 +506,8 @@ function leerTrazabilidad_(targetAnio) {
     idxComentario = h.indexOf(COMENTARIO_HEADERS_CANDIDATOS[ci]);
   }
 
-  var sucursales = {};
+  var sucursales = {};          // solo obras con datos en targetAnio (sidebar)
+  var todasLasSucursales = {};  // TODAS las obras, sin filtro de año (pestaña FGR)
   var porEmpresaMes = {};
   var comentariosPorEmpresaMes = {};
 
@@ -505,12 +519,14 @@ function leerTrazabilidad_(targetAnio) {
     var residuo = String(r[idxRes] || "").trim();
     if (!mes || !residuo) return;
 
-    // FIX (2026-08-28, a pedido del usuario): antes se listaba la obra en
-    // "sucursales" ANTES de aplicar el filtro de año, para que el sidebar
-    // siempre mostrara las 53 obras sin importar el año elegido. El usuario
-    // pidio lo contrario: que el sidebar solo muestre las obras que SI
-    // tienen registros de residuos en el año seleccionado. Se movio esta
-    // linea despues del filtro de año.
+    // FIX (2026-08-28, a pedido del usuario): el sidebar solo debe mostrar
+    // las obras que SI tienen registros de residuos en el año seleccionado.
+    // Pero la pestaña FGR (comparativa entre TODAS las obras) debe seguir
+    // mostrandolas todas sin importar el año — por eso se guardan ambos
+    // mapas: "todasLasSucursales" (sin filtrar, para FGR) y "sucursales"
+    // (filtrado por año, para el sidebar/resto del visor).
+    todasLasSucursales[empId] = suc;
+
     var anioFila = idxAnio === -1 ? "" : String(r[idxAnio] || "").trim();
     if (!anioFila) anioFila = String(new Date().getFullYear());
     if (targetAnio && anioFila !== targetAnio) return;
@@ -541,7 +557,7 @@ function leerTrazabilidad_(targetAnio) {
     }
   });
 
-  return { sucursales: sucursales, porEmpresaMes: porEmpresaMes, comentarios: comentariosPorEmpresaMes };
+  return { sucursales: sucursales, todasLasSucursales: todasLasSucursales, porEmpresaMes: porEmpresaMes, comentarios: comentariosPorEmpresaMes };
 }
 
 function leerValorizacion_(targetAnio) {
@@ -790,6 +806,22 @@ function leerTotalResiduos_() {
   return result;
 }
 
+// Arma el objeto "fgr" ({totalM3, primerRegistro, ultimoRegistro}) de una
+// obra a partir de lo que devolvio leerTotalResiduos_(). Compartido entre
+// construirEmpresas_() (una obra a la vez) y buildPayload_() (para armar
+// TODAS_OBRAS_FGR, sin filtro de año).
+function construirFgrInfo_(empId, totalResiduosPorEmpresa) {
+  var trInfo = (totalResiduosPorEmpresa || {})[empId] || { totalM3: 0, registros: [] };
+  var registrosOrdenados = trInfo.registros.slice().sort(function (a, b) { return a.orden - b.orden; });
+  var primerReg = registrosOrdenados[0] || null;
+  var ultimoReg = registrosOrdenados[registrosOrdenados.length - 1] || null;
+  return {
+    totalM3: Math.round(trInfo.totalM3 * 100) / 100,
+    primerRegistro: primerReg ? (primerReg.mes + ' ' + primerReg.anio) : null,
+    ultimoRegistro: ultimoReg ? (ultimoReg.mes + ' ' + ultimoReg.anio) : null
+  };
+}
+
 
 // ── Construcción del modelo para el visor ──
 
@@ -874,13 +906,6 @@ function construirEmpresas_(traza, val, cse, objetivosPorEmpresa, objetivosMaest
     var cseInfo = cse.cseData[empId] || { correo: {}, reunion: {}, encuesta: {}, fechas: {} };
     var anualInfo = cse.anualData[empId] || {};
 
-    // FGR: total m3 + fecha (mes+año) del primer y ultimo registro de
-    // residuos, desde "Total Residuos". Sin registros = null en ambos.
-    var trInfo = (totalResiduosPorEmpresa || {})[empId] || { totalM3: 0, registros: [] };
-    var registrosOrdenados = trInfo.registros.slice().sort(function (a, b) { return a.orden - b.orden; });
-    var primerReg = registrosOrdenados[0] || null;
-    var ultimoReg = registrosOrdenados[registrosOrdenados.length - 1] || null;
-
     empresas.push({
       id: empId,
       nombre: EMPRESA_NOMBRE,
@@ -893,11 +918,7 @@ function construirEmpresas_(traza, val, cse, objetivosPorEmpresa, objetivosMaest
       cse: cseInfo,
       mensual: mensual,
       anual: anualInfo,
-      fgr: {
-        totalM3: Math.round(trInfo.totalM3 * 100) / 100,
-        primerRegistro: primerReg ? (primerReg.mes + ' ' + primerReg.anio) : null,
-        ultimoRegistro: ultimoReg ? (ultimoReg.mes + ' ' + ultimoReg.anio) : null
-      }
+      fgr: construirFgrInfo_(empId, totalResiduosPorEmpresa)
     });
   });
 
