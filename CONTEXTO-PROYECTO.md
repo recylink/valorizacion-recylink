@@ -1604,6 +1604,25 @@ errores y el selector queda vacío como se espera; simulando un payload con año
 puebla y queda seleccionado el correcto, y `cargarDatos()` arma la URL con `&anio=X`
 correctamente al cambiar de año.
 
+## Pestaña FGR: de por-obra a tabla comparativa entre todas las obras (2026-08-28)
+El usuario pidió que la pestaña FGR (repo `socovesa-trazabilidad`, ver secciones anteriores)
+dejara de mostrar solo la obra seleccionada y en su lugar fuera una tabla comparativa con todas
+las obras a la vez. `renderFGR()` ya no recibe `emp` — ahora itera sobre `EMPRESAS` completo y
+arma una fila por obra (Obra, Primer/Último registro, Total M3, M2 construidos editable, FGR),
+con la fila de la obra actualmente seleccionada (`empActual`) resaltada en celeste para no
+perder el contexto de navegación. El input+botón de m2 construidos por fila sigue funcionando
+igual (localStorage, por obra) — al guardar, `renderMain()` re-renderiza la tabla completa así
+que el cambio se ve al instante en su fila.
+
+Los KPI de arriba también pasaron a ser agregados entre todas las obras en vez de por-obra:
+Total M3 (suma de todas), Obras con FGR calculado (X/N), FGR promedio (entre las que ya tienen
+m2 cargado) y Mejor FGR (menor valor = menos m3 por m2 construido).
+
+Probado en vivo contra el Apps Script real (ya con el backend de FGR desplegado): las 53 obras
+aparecen en la tabla con sus datos reales de m3 y fechas; al cargar m2 en 2 obras de prueba, el
+KPI "Obras con FGR calculado" pasó de 0/53 a 2/53 y "FGR promedio"/"Mejor FGR" se calcularon
+correctamente.
+
 ## Cómo verificar sintaxis JS del archivo
 El HTML es un solo archivo con `<script>...</script>` embebido. Para validar sintaxis:
 ```bash
