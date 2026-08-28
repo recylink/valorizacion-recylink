@@ -1456,6 +1456,46 @@ efectivamente usa una meta de % valorización (su objetivo principal es FGR por 
       (`autoSync()`) y `metas` (`renderCopecObjetivos()`) para habilitar meta de valorización
       editable/sincronizada, igual que Gespania/Salfa/Euro/Ando.
 
+## Bug real en producción: columna Año de Trazabilidad_Docs corrida en Socovesa (2026-08-28)
+El usuario reportó dos síntomas aparentemente separados: "no se cargan los años en la columna
+Año en 📊 Trazabilidad_Docs" y "no se cargan los objetivos en el visor". Investigado leyendo el
+doGet real de Socovesa (`curl` directo al Apps Script, sin pasar por el navegador) — **mismo
+tipo de bug que el de Valorización/Objetivos corregido antes, pero esta vez en
+Trazabilidad_Docs**, con un efecto en cascada mucho peor:
+
+- La hoja real ya tenía una columna **Año** agregada en Trazabilidad_Docs (entre Mes y
+  Residuo), igual que Valorización/Objetivos — pero a diferencia de esas dos, el visor nunca
+  se actualizó para mandarla en el sync de Socovesa (`esEuroTraz` solo cubría `'euro'`).
+  Resultado real, confirmado con datos en vivo: la columna Año se llenaba con el **nombre del
+  residuo** (`"Cartón"`, `"Vidrio"`, etc.) y todo lo demás se corría un lugar — Residuo recibía
+  el nombre del transportista, Transportista recibía el conteo de LER, etc. El último campo
+  (Disposición final) se quedaba sin destino y nunca se escribía.
+- Esa corrupción se propagaba en cadena al leer los datos de vuelta: `mesKey` se armaba como
+  `Año + '-' + mes` → con Año corrupto, `mesesDisp` terminaba con entradas como `"Cartón-01"`,
+  `"Vidrio-07"` en vez de `"2026-01"`. El selector de Año del visor de Objetivos quedaba con
+  opciones tipo `"Cart"`, `"Vidr"` (los primeros 4 caracteres de esos mesKey corruptos) en vez
+  de `"2026"`, y por default se seleccionaba la última opción alfabética (`"Vidr"`) — que no
+  matcheaba ningún mes real, así que la tabla mensual de Objetivos quedaba vacía/con headers
+  "undefined". Esto explica el segundo síntoma reportado ("no se cargan los objetivos"): no es
+  que los objetivos no existan (el Análisis Anual, que no depende del filtro de mes/año, sí
+  mostraba datos reales) — es que el filtro de Año quedaba en un valor basura que no matcheaba
+  nada, dejando vacía la tabla mensual.
+- **Corregido**: nueva rama `esSocovesaTraz` en el armado de `filasTraz` (`autoSync()`), con el
+  orden de columnas real confirmado directamente desde el doGet (no es el mismo orden que usa
+  Euro — Socovesa no tiene "Transportista (nombre)" ni "Factura" como columnas separadas):
+  `Sucursal, Mes, Año, Residuo, Transportista, Código LER, Importaciones, Cert. tratamiento,
+  Cert. declaración, Disposición final`.
+- De paso se encontró (y corrigió) un segundo bug menor de lectura: `r.disp` (Disposición
+  final) nunca hacía match porque el código solo probaba `row['Disp. final']` y
+  `row['Disposicion final']` (sin tilde) — el header real es `"Disposición final"` (con í y ó).
+  Se agregó esa variante a los fallbacks.
+- **No hace falta tocar Code-Socovesa.gs**: `writeTrazabilidad` borra por empresa_id+mes exacto
+  sin importar cuántas columnas trae la fila, así que el fix es 100% del lado del cliente.
+- **Los datos históricos ya corrompidos NO se autocorrigen solos** — quedan así hasta que se
+  vuelva a sincronizar ese mes puntual (re-subir el Excel de esos meses sobreescribe/borra esas
+  filas por empresa_id+mes exacto e inserta las correctas). Recomendado avisarle al usuario que
+  re-suba los Excel de los meses ya sincronizados para Socovesa.
+
 ## Cómo verificar sintaxis JS del archivo
 El HTML es un solo archivo con `<script>...</script>` embebido. Para validar sintaxis:
 ```bash

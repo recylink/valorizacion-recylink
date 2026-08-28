@@ -1342,9 +1342,25 @@ function autoSync(rows) {
   // la pestaña Trazabilidad de la app) para no agregar esa columna ahí también —
   // mismo criterio que Valorización/Objetivos: Año es solo para sincronización.
   var esEuroTraz = empresaActual === 'euro';
+  // Socovesa tambien agrego una columna Año en Trazabilidad_Docs, pero con un
+  // orden de columnas DISTINTO al de Euro (sin "Transportista (nombre)" ni
+  // "Factura" — confirmado leyendo el doGet real, 2026-08-28): Sucursal, Mes,
+  // Año, Residuo, Transportista, Código LER, Importaciones, Cert.
+  // tratamiento, Cert. declaración, Disposición final. Sin esto, cada sync
+  // escribia el Residuo en la columna Año y todo lo demas se corria un lugar
+  // (bug real encontrado en produccion: el filtro de Año del visor quedaba
+  // con nombres de residuo tipo "Cart"/"Vidr" en vez de "2026", lo que a su
+  // vez rompia el filtro de mes y hacia que la tabla mensual de Objetivos no
+  // mostrara nada). Los sync viejos (con la fila corrida) se autocorrigen la
+  // proxima vez que se re-suba el Excel de ese mes, porque writeTrazabilidad
+  // borra por empresa_id+mes exacto antes de reinsertar.
+  var esSocovesaTraz = empresaActual === 'socovesa';
   var filasTraz = trazRows.map(function(r){
     if (esEuroTraz) {
       return [sucId(r.suc), r.suc, MESES_ES[parseInt(r.mes.slice(5))], r.mes.slice(0,4), r.residuo, r.ler, r.imp, r.cert, r.factura, r.decl, r.transp, r.disp];
+    }
+    if (esSocovesaTraz) {
+      return [sucId(r.suc), r.suc, MESES_ES[parseInt(r.mes.slice(5))], r.mes.slice(0,4), r.residuo, r.transp, r.ler, r.imp, r.cert, r.decl, r.disp];
     }
     var row = [sucId(r.suc)];
     emp.trazCols.forEach(function(col){
@@ -2350,7 +2366,7 @@ function loadSheetsData(data) {
       r.factura = parseInt(row['Factura']||0)||0;
       r.decl = parseInt(row['Cert. decl.']||row['Cert. declaracion']||row['Cert. declaración']||0)||0;
       r.transp = parseInt(row['Transportista']||0)||0;
-      r.disp = parseInt(row['Disp. final']||row['Disposicion final']||0)||0;
+      r.disp = parseInt(row['Disp. final']||row['Disposicion final']||row['Disposición final']||0)||0;
       trazRows.push(r);
     });
   }
