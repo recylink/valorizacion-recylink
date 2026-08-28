@@ -1408,6 +1408,54 @@ por lo tanto nunca va a cumplir ese objetivo, sin que eso la perjudique en su % 
    dibujara superpuesto sobre las columnas vecinas en vez de envolverse. Corregido forzando
    `white-space:normal;word-break:break-word` en los `<th>` de esta tabla especifica.
 
+## Code-Socovesa.gs sincronizado con el real + bug de columna Año (2026-08-28)
+El usuario pegó su Code.gs real de Socovesa (versión "fusionada": doPost/doGet clásicos +
+visor nuevo `?visor=1` + visor de Minutas `?minutas=1`, con varios FIX numerados en el propio
+archivo). No existía `Code-Socovesa.gs` en el repo — el `Code.gs` genérico que sí había es en
+realidad el de **Copec** (`EMPRESA_NOMBRE = "COPEC"`). Se creó `Code-Socovesa.gs` con el
+contenido real tal cual.
+
+**Bug real encontrado al revisar ese script** (no reportado por el usuario, encontrado leyendo
+el código): los comentarios "FIX 3" y "FIX 5" de ese archivo dejan claro que las hojas
+`♻️ Valorización` y `🎯 Objetivos` de Socovesa **ahora tienen una columna Año agregada** (mismo
+esquema que Euro: Objetivos pasa a 7 columnas con Objetivo en el índice 4 en vez de 3;
+Valorización pasa a incluir Año en el índice 3). Pero en `valorizacion-recylink.html` el único
+lugar que armaba filas con esa columna Año era código que chequeaba literalmente
+`empresaActual === 'euro'` — Socovesa nunca estaba incluida. Efecto real: cualquier sync de
+Objetivos o Valorización para Socovesa (sea el automático al subir un Excel, o mi editor nuevo
+de "objetivo manual") mandaba una fila con una columna menos de la que el Sheet real espera,
+lo que corre todo el resto de columnas un lugar — el texto del objetivo cae en la columna Año,
+el estado cae en la columna Objetivo, etc. Nunca se manifestó como error visible porque
+`writeObjetivos`/`writeValorizacion` no validan el largo de la fila, solo escriben lo que
+llega con `setValues()`.
+
+Corregido generalizando el flag a una tabla `EMPRESAS_OBJ_CON_ANIO`/`EMPRESAS_VAL_CON_ANIO =
+{euro:1, socovesa:1}` (en vez de hardcodear `'euro'` cada vez) y usándola en los 3 lugares que
+arman filas posicionales: `autoSync()` (`filasObj`, `filasVal`) y `guardarObjetivoManual()`.
+La lectura (`parseObjetivosRows_`, `loadSheetsData`) nunca tuvo este problema porque ya lee por
+nombre de columna (`row['Año']`, `row['Objetivo']`, etc.), no por posición — es agnóstica al
+orden/cantidad de columnas del Sheet real.
+
+De paso, el mismo Code-Socovesa.gs agrega `writeTotalResiduos` (hoja "Total Residuos", mismo
+formato que Euro: Sucursal|Año|Mes|Residuo|...|Tons. CO2eq. evitadas) — pero el cliente nunca
+generaba esas filas para Socovesa (`generaTotalResiduos` en `processData()` y la condición de
+`filasTotalResiduos` en `autoSync()` no la incluían). Se agregó `socovesa` a ambas, con
+`generaAnioTR`/`generaCO2TR` en `true` (mismo formato que Euro), para que esa hoja empiece a
+poblarse al subir el Excel.
+
+**Pendiente, NO corregido (fuera de alcance de este cambio, requiere decisión del usuario)**:
+Socovesa tampoco tiene soporte de "Meta de valorización" en el visor — ni en `autoSync()`
+(`metasActuales`) ni en `renderCopecObjetivos()` (`metas`) está incluida en la lista de
+empresas que leen `metasFromSheets`, así que aunque alguien complete una fila "Meta %" a mano
+en el Sheet, el visor nunca la usa (no se ve la fila "Meta 2026", no colorea %Real vs Meta, y
+"% Valorización vs. meta" nunca aporta a su salud). No se tocó porque no está claro si Socovesa
+efectivamente usa una meta de % valorización (su objetivo principal es FGR por proyecto, no un
+% global) — antes de agregarla habría que confirmar con el usuario.
+
+- [ ] **Socovesa**: si corresponde, agregar `'socovesa'` a las listas de `metasActuales`
+      (`autoSync()`) y `metas` (`renderCopecObjetivos()`) para habilitar meta de valorización
+      editable/sincronizada, igual que Gespania/Salfa/Euro/Ando.
+
 ## Cómo verificar sintaxis JS del archivo
 El HTML es un solo archivo con `<script>...</script>` embebido. Para validar sintaxis:
 ```bash

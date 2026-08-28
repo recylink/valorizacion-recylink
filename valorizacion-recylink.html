@@ -546,6 +546,18 @@ var OBJ_ANUALES = {valorizar_residuo:1,reg_valorizar:1,respel:1,valorizar_especi
 // tiene fila propia en la tabla), pero se trata igual para efectos de
 // isObjetivoDormido/getObjetivosDormidosUI.
 var META_VAL_OBJ_NOMBRE = '% Valorización vs. meta';
+// Empresas cuya hoja "🎯 Objetivos" real tiene una columna Año agregada en D
+// (empresa_id, Sucursal, Mes, Año, Objetivo, % cumplimiento, Detalle — 7
+// columnas, el Objetivo corre al indice 4) en vez del formato original de 6
+// columnas (sin Año, Objetivo en el indice 3). Euro la tiene desde que se
+// integro; Socovesa la agrego despues (ver Code-Socovesa.gs, FIX 5
+// 2026-08-28) — cualquier fila de objetivos que el visor sincronice para
+// estas empresas debe incluir el Año o queda todo corrido una columna.
+var EMPRESAS_OBJ_CON_ANIO = {euro:1, socovesa:1};
+// Mismo caso para la hoja "♻️ Valorización": Euro y Socovesa tienen una
+// columna Año agregada (empresa_id, Sucursal, Tipo, Año, ene%, feb%, ...)
+// en vez del formato original sin Año — ver Code-Socovesa.gs FIX 3.
+var EMPRESAS_VAL_CON_ANIO = {euro:1, socovesa:1};
 
 var ABASTIBLE_METAS = {
   'Planta Concón': 15,
@@ -1086,7 +1098,8 @@ function processData(rows, fname) {
   var esPms = empresaActual === 'pms';
   var esCcu = empresaActual === 'ccu';
   var esAcciona = empresaActual === 'acciona';
-  var generaTotalResiduos = esCopec || esAbastible || esGespania || esSalfa || esEuro || esAndo || esPms || esCcu || esAcciona;
+  var esSocovesa = empresaActual === 'socovesa';
+  var generaTotalResiduos = esCopec || esAbastible || esGespania || esSalfa || esEuro || esAndo || esPms || esCcu || esAcciona || esSocovesa;
   // Costo e Ingreso por residuo: solo para empresas que tienen el objetivo
   // "KPI costo e ingreso" (tipo 'kpi_costo') — hoy Abastible, Salfa, Ando y CCU.
   // Se deriva de emp.objetivos en vez de hardcodear la lista de empresas para
@@ -1243,11 +1256,12 @@ function autoSync(rows) {
   // Preparar payload valorización
   var metasActuales = empresaActual === 'copec' ? getCopecMetas() : empresaActual === 'acciona' ? getAccionaMetas() : empresaActual === 'abastible' ? ABASTIBLE_METAS : empresaActual === 'pms' ? getPmsMetas() : empresaActual === 'ccu' ? CCU_METAS : (empresaActual === 'gespania' || empresaActual === 'salfa' || empresaActual === 'euro' || empresaActual === 'ando') ? metasFromSheets : {};
   var filasVal = [];
-  // Euro: fila por Tipo POR AÑO (columna Año agregada a mano en la hoja, con
-  // meses fijos Ene-Dic) en vez de un encabezado con un mes-año por columna —
-  // Sheets convertia ese texto en fecha real y rompia la lectura (ver
-  // CONTEXTO-PROYECTO.md, "Año en Valorizacion (Euro)").
-  var esEuroVal = empresaActual === 'euro';
+  // Euro y Socovesa: fila por Tipo POR AÑO (columna Año agregada a mano en la
+  // hoja, con meses fijos Ene-Dic) en vez de un encabezado con un mes-año por
+  // columna — Sheets convertia ese texto en fecha real y rompia la lectura
+  // (ver CONTEXTO-PROYECTO.md, "Año en Valorizacion (Euro)"). Socovesa agrego
+  // la misma columna despues (ver Code-Socovesa.gs, FIX 3).
+  var esEuroVal = EMPRESAS_VAL_CON_ANIO[empresaActual];
   var aniosDisp = esEuroVal ? Array.from(new Set(mesesDisp.map(function(m){ return m.slice(0,4); }))).sort() : null;
   sucursales.forEach(function(suc){
     var id = sucId(suc);
@@ -1282,13 +1296,14 @@ function autoSync(rows) {
     }
   });
 
-  // Total Residuos (Copec, Abastible, Gespania, Salfa, Euro y Ando): Sucursal | Mes | Residuo | Valorizado/No Valorizado | Respel no respel | Total KG | Total M3 [| Tons. CO2eq. evitadas]
-  // Año (col. B) y Tons. CO2eq. evitadas son exclusivos de Euro y del grupo original
-  // (Copec/Abastible/Gespania/Salfa/Euro) respectivamente — Ando no usa ninguna de las 2.
+  // Total Residuos (Copec, Abastible, Gespania, Salfa, Euro, Ando y Socovesa): Sucursal | Mes | Residuo | Valorizado/No Valorizado | Respel no respel | Total KG | Total M3 [| Tons. CO2eq. evitadas]
+  // Año (col. B) y Tons. CO2eq. evitadas son exclusivos de Euro/Socovesa y del grupo original
+  // (Copec/Abastible/Gespania/Salfa/Euro/Socovesa) respectivamente — Ando no usa ninguna de las 2.
+  // Socovesa agrego esta hoja despues, con el mismo formato que Euro (ver Code-Socovesa.gs).
   var filasTotalResiduos = [];
-  if (empresaActual === 'copec' || empresaActual === 'abastible' || empresaActual === 'gespania' || empresaActual === 'salfa' || empresaActual === 'euro' || empresaActual === 'ando' || empresaActual === 'pms' || empresaActual === 'ccu' || empresaActual === 'acciona') {
-    var generaAnioTR = empresaActual === 'euro';
-    var generaCO2TR = empresaActual === 'copec' || empresaActual === 'abastible' || empresaActual === 'gespania' || empresaActual === 'salfa' || empresaActual === 'euro';
+  if (empresaActual === 'copec' || empresaActual === 'abastible' || empresaActual === 'gespania' || empresaActual === 'salfa' || empresaActual === 'euro' || empresaActual === 'ando' || empresaActual === 'pms' || empresaActual === 'ccu' || empresaActual === 'acciona' || empresaActual === 'socovesa') {
+    var generaAnioTR = empresaActual === 'euro' || empresaActual === 'socovesa';
+    var generaCO2TR = empresaActual === 'copec' || empresaActual === 'abastible' || empresaActual === 'gespania' || empresaActual === 'salfa' || empresaActual === 'euro' || empresaActual === 'socovesa';
     filasTotalResiduos = totalResiduosRows.map(function(r){
       var row = [r.suc];
       if (generaAnioTR) row.push(r.mes.slice(0,4));
@@ -1343,11 +1358,10 @@ function autoSync(rows) {
   // Preparar payload objetivos para Copec (trazabilidad)
   var filasObj = [];
   if (emp.objetivos) {
-    var esEuroObj = empresaActual === 'euro';
     filasObj = calcObjetivos().map(function(r){
-      if (esEuroObj) {
-        // Euro agregó una columna Año en D de 🎯 Objetivos — vacía para las
-        // filas anuales (mesKey='anual', no aplica un año especifico).
+      if (EMPRESAS_OBJ_CON_ANIO[empresaActual]) {
+        // Columna Año agregada en D de 🎯 Objetivos — vacía para las filas
+        // anuales (mesKey='anual', no aplica un año especifico).
         var anioObj = r.anual ? '' : r.mesKey.slice(0,4);
         return [sucId(r.suc), r.suc, r.mes, anioObj, r.obj, r.estado, r.detalle];
       }
@@ -3002,7 +3016,7 @@ function guardarObjetivoManual(suc, mesLabel, mesKey, anio, objNombre, estado, d
   if (mesKey === 'anual') manualEditsCache[companyId].anual[suc+'|'+objNombre] = {estado:estado, detalle:detalle};
   else manualEditsCache[companyId].mensual[suc+'|'+mesKey+'|'+objNombre] = {estado:estado, detalle:detalle};
 
-  var fila = (companyId === 'euro')
+  var fila = EMPRESAS_OBJ_CON_ANIO[companyId]
     ? [sucId(suc), suc, mesLabel, anio, objNombre, estado, detalle]
     : [sucId(suc), suc, mesLabel, objNombre, estado, detalle];
 
