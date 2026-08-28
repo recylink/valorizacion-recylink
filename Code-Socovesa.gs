@@ -505,11 +505,17 @@ function leerTrazabilidad_(targetAnio) {
     var residuo = String(r[idxRes] || "").trim();
     if (!mes || !residuo) return;
 
-    sucursales[empId] = suc;
-
+    // FIX (2026-08-28, a pedido del usuario): antes se listaba la obra en
+    // "sucursales" ANTES de aplicar el filtro de año, para que el sidebar
+    // siempre mostrara las 53 obras sin importar el año elegido. El usuario
+    // pidio lo contrario: que el sidebar solo muestre las obras que SI
+    // tienen registros de residuos en el año seleccionado. Se movio esta
+    // linea despues del filtro de año.
     var anioFila = idxAnio === -1 ? "" : String(r[idxAnio] || "").trim();
     if (!anioFila) anioFila = String(new Date().getFullYear());
     if (targetAnio && anioFila !== targetAnio) return;
+
+    sucursales[empId] = suc;
 
     var docs = {};
     DOC_COLS.forEach(function (c, i) {

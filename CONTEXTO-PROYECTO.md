@@ -1623,6 +1623,41 @@ aparecen en la tabla con sus datos reales de m3 y fechas; al cargar m2 en 2 obra
 KPI "Obras con FGR calculado" pasó de 0/53 a 2/53 y "FGR promedio"/"Mejor FGR" se calcularon
 correctamente.
 
+## FGR pasa a botón global (junto a Minutas) + sidebar filtrado por año (2026-08-28)
+Dos pedidos del usuario sobre el mismo repo (`socovesa-trazabilidad`):
+
+1. **FGR como botón global**: como la pestaña FGR ya es una comparativa entre TODAS las obras
+   (no depende de cuál esté seleccionada), dejó de tener sentido como una vtab dentro de cada
+   obra — se sacó de ahí. Ahora es un botón "📐 FGR" en la topbar, al lado de "📝 Minutas",
+   mismo mecanismo (`vistaGlobal="fgr"`, `fgrToggleVista()`/`irAFGR()`/`fgrUpdateAccessBtn()`,
+   calcados de sus equivalentes `mn*` de Minutas). A diferencia de Minutas, el sidebar NO se
+   reemplaza al entrar a FGR — se deja el listado normal de obras, para poder seguir
+   navegando/seleccionando una desde ahí (`setEmp()` ya vuelve solo a `vistaGlobal="empresa"`
+   al hacer clic en una obra). `renderMain()` gana un nuevo early-return para
+   `vistaGlobal==="fgr"` (`renderFGRGlobal()`, que solo pone un encabezado simple + el mismo
+   `renderFGR()` de antes) — mismo patrón que ya existía para `"minutas"`. Los 4 lugares que
+   llamaban `mnUpdateAccessBtn()` (incluido `setEmp()`) ahora también llaman
+   `fgrUpdateAccessBtn()`, para que ambos botones se mantengan sincronizados sin importar por
+   cuál vista se navegue.
+2. **Sidebar filtrado por año**: antes `leerTrazabilidad_()` listaba una obra en `sucursales`
+   ANTES de aplicar el filtro de año (decisión explícita de la vez anterior, para que ninguna
+   obra "desapareciera" del sidebar al cambiar de año). El usuario pidió lo contrario: que el
+   costado izquierdo solo muestre las obras que sí tienen registros de residuos en el año
+   seleccionado. Se movió `sucursales[empId] = suc;` a DESPUÉS del filtro de año — ahora una
+   obra sin ningún registro de Trazabilidad_Docs en el año elegido no aparece en el sidebar ni
+   en la tabla comparativa de FGR (que itera `EMPRESAS`, poblado desde `traza.sucursales`).
+
+Probado en vivo: el botón FGR aparece junto a Minutas, activa `vistaGlobal="fgr"` y muestra la
+tabla comparativa con el sidebar de obras intacto; alternar FGR↔Minutas↔obra funciona limpio
+(un solo botón queda "primary" a la vez); hacer clic en una obra del sidebar vuelve
+correctamente a su vista normal. El filtro de sidebar por año se verificó con datos simulados
+(mismo algoritmo que quedó en `Code-Socovesa.gs`) — el backend real todavía no tiene este
+cambio desplegado.
+
+**Pendiente de acción del usuario (otra vez)**: hay que volver a copiar `Code-Socovesa.gs` al
+editor de Apps Script y reimplementar para que el sidebar/FGR reales empiecen a excluir las
+obras sin datos del año seleccionado.
+
 ## Cómo verificar sintaxis JS del archivo
 El HTML es un solo archivo con `<script>...</script>` embebido. Para validar sintaxis:
 ```bash
