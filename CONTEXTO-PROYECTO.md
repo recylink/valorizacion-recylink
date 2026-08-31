@@ -1921,6 +1921,29 @@ Verificado con la función real `autoSync()` (interceptando `fetch`): la fila sa
 `["Nuncio Ossa", "2026", "Marzo", "Escombro", "No Valorizado", "No respel", 1000, 5, 0.5]` — Año
 en la posición correcta (índice 1, columna B).
 
+## "valorizar un 5% de residuos en kg" usa el % Acumulado real (2026-08-31)
+Seguimiento del hallazgo anterior: en vez de borrar el texto duplicado de "Objetivos 2026", el
+usuario pidió que ESE objetivo muestre el cálculo real (% Acumulado vs. Meta %), en vez de
+quedar en null. Se modificó `construirEmpresas_()` en `Code-Gespania.gs`:
+
+- El cálculo de `avanceVal`/`metaVal` (que antes vivía después del armado de `objetivos`, solo
+  para la tarjeta sintética del final) se movió ANTES del loop sobre `objetivosMaestro`.
+- Nuevo `esObjetivoValorizacionPct_(texto)` — regex `/valorizar.*residuos/i` — detecta
+  genéricamente un texto de "Objetivos 2026" con forma "valorizar ... residuos ..." (hoy es
+  literal "valorizar un 5% de residuos en kg", pero no se hardcodeó el texto completo por si
+  cambia la redacción). Cuando el loop encuentra un texto así, en vez de buscar (y no
+  encontrar) una fila en `objetivosPorEmpresa`, le asigna `avance`/`ok`/`meta` directamente
+  desde `avanceVal`/`metaVal`.
+- La tarjeta sintética "X% Valorización" al final (que existía porque Socovesa no tiene un
+  texto de % de valorización en su propio "Objetivos 2026") ahora solo se agrega si NINGÚN
+  texto de la lista maestra ya cubrió ese rol (`yaSeMostroValorizacionPct`) — para Gespania,
+  que sí lo trae, deja de duplicarse.
+
+Verificado extrayendo la función real y corriéndola con datos de prueba (Node, sin Apps
+Script): con acumulado=0.7% y meta=5%, el objetivo "valorizar un 5% de residuos en kg" da
+`{avance:0.7, meta:5, ok:false}` en vez de `{avance:null, meta:100, ok:null}`, y la tarjeta
+"X% Valorización" ya no aparece duplicada en la lista.
+
 ## Cómo verificar sintaxis JS del archivo
 El HTML es un solo archivo con `<script>...</script>` embebido. Para validar sintaxis:
 ```bash

@@ -849,18 +849,61 @@ function construirEmpresas_(traza, val, cse, objetivosPorEmpresa, objetivosMaest
       };
     });
 
+    // % Valorización acumulada vs. Meta % (hoja ♻️ Valorización) — se calcula
+    // ANTES de armar la lista de objetivos porque "valorizar un 5% de
+    // residuos en kg" (texto de "Objetivos 2026") debe mostrar ESTE mismo
+    // numero, no una fila de "🎯 Objetivos" que nunca existe (ese objetivo
+    // se sacó de la UI del visor principal a propósito, ver
+    // valorizacion-recylink.html — se mide vía Meta %/% Acumulado, no vía
+    // una fila de Objetivos con ese texto exacto).
+    var valInfo = val[empId] || { meses: {}, meta: {}, acumulado: {} };
+    var mesesValOrdenados = Object.keys(valInfo.meses)
+      .sort(function (a, b) { return MESES.indexOf(a) - MESES.indexOf(b); });
+    var ultimoMesVal = mesesValOrdenados[mesesValOrdenados.length - 1];
+
+    var mesesAcumOrdenados = Object.keys(valInfo.acumulado || {})
+      .sort(function (a, b) { return MESES.indexOf(a) - MESES.indexOf(b); });
+    var ultimoMesAcum = mesesAcumOrdenados[mesesAcumOrdenados.length - 1];
+
+    var avanceVal = ultimoMesAcum !== undefined
+      ? valInfo.acumulado[ultimoMesAcum]
+      : (ultimoMesVal !== undefined ? valInfo.meses[ultimoMesVal] : null);
+
+    var metaVal = (ultimoMesVal !== undefined && valInfo.meta[ultimoMesVal] !== undefined)
+      ? valInfo.meta[ultimoMesVal] : null;
+
+    // Cualquier texto de "Objetivos 2026" con forma "valorizar ... % ... de
+    // residuos ..." se trata como el objetivo de % de valorización — hoy
+    // en Gespania es literalmente "valorizar un 5% de residuos en kg".
+    var esObjetivoValorizacionPct_ = function (texto) {
+      return /valorizar.*residuos/i.test(texto);
+    };
+
     // Objetivos: se arma la lista completa a partir de "Objetivos 2026" (la
     // lista maestra), rellenando el avance real de cada uno desde la hoja
-    // "🎯 Objetivos" para ESTA obra si existe.
+    // "🎯 Objetivos" para ESTA obra si existe (salvo el de % de
+    // valorización, que usa avanceVal/metaVal en vez de buscar una fila).
     var objRealesPorClave = {};
     (objetivosPorEmpresa[empId] || []).forEach(function (o) {
       objRealesPorClave[o.texto.toLowerCase()] = o;
     });
 
     var objetivos = [{ texto: "100% Trazabilidad" }]; // el front-end la recalcula en vivo
+    var yaSeMostroValorizacionPct = false;
 
     (objetivosMaestro || []).forEach(function (textoMaestro) {
       if (/trazabilidad/i.test(textoMaestro)) return; // ya está cubierta arriba
+      if (esObjetivoValorizacionPct_(textoMaestro)) {
+        objetivos.push({
+          texto: textoMaestro,
+          avance: avanceVal,
+          ok: (metaVal !== null && avanceVal !== null) ? (avanceVal >= metaVal) : null,
+          meta: metaVal !== null ? metaVal : 100,
+          detalle: ""
+        });
+        yaSeMostroValorizacionPct = true;
+        return;
+      }
       var real = objRealesPorClave[textoMaestro.toLowerCase()];
       if (real) {
         objetivos.push({
@@ -885,28 +928,17 @@ function construirEmpresas_(traza, val, cse, objetivosPorEmpresa, objetivosMaest
       });
     }
 
-    var valInfo = val[empId] || { meses: {}, meta: {}, acumulado: {} };
-    var mesesValOrdenados = Object.keys(valInfo.meses)
-      .sort(function (a, b) { return MESES.indexOf(a) - MESES.indexOf(b); });
-    var ultimoMesVal = mesesValOrdenados[mesesValOrdenados.length - 1];
-
-    var mesesAcumOrdenados = Object.keys(valInfo.acumulado || {})
-      .sort(function (a, b) { return MESES.indexOf(a) - MESES.indexOf(b); });
-    var ultimoMesAcum = mesesAcumOrdenados[mesesAcumOrdenados.length - 1];
-
-    var avanceVal = ultimoMesAcum !== undefined
-      ? valInfo.acumulado[ultimoMesAcum]
-      : (ultimoMesVal !== undefined ? valInfo.meses[ultimoMesVal] : null);
-
-    var metaVal = (ultimoMesVal !== undefined && valInfo.meta[ultimoMesVal] !== undefined)
-      ? valInfo.meta[ultimoMesVal] : null;
-
-    var textoVal = metaVal !== null ? (metaVal + "% Valorización") : "Meta Valorización (sin definir)";
-    objetivos.push({
-      texto: textoVal,
-      avance: avanceVal,
-      ok: (metaVal !== null && avanceVal !== null) ? (avanceVal >= metaVal) : null
-    });
+    // Tarjeta "X% Valorización" aparte: solo si "Objetivos 2026" no traía ya
+    // un texto de % de valorización (Gespania sí lo trae — "valorizar un 5%
+    // de residuos en kg" — así que para Gespania esto ya no se duplica).
+    if (!yaSeMostroValorizacionPct) {
+      var textoVal = metaVal !== null ? (metaVal + "% Valorización") : "Meta Valorización (sin definir)";
+      objetivos.push({
+        texto: textoVal,
+        avance: avanceVal,
+        ok: (metaVal !== null && avanceVal !== null) ? (avanceVal >= metaVal) : null
+      });
+    }
 
     var cseInfo = cse.cseData[empId] || { correo: {}, reunion: {}, encuesta: {}, fechas: {} };
     var anualInfo = cse.anualData[empId] || {};
