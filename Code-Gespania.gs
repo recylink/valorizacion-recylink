@@ -201,17 +201,20 @@ function buscarFilaEncabezado_(sheet, valorEsperado) {
 // el cliente. El cliente siempre envía el set completo vigente (calculado
 // desde el Excel cargado), así que no hace falta borrado selectivo por
 // empresa_id como en writeValorizacion (esta hoja no tiene esa columna).
-// numCols=7 (Sucursal|Mes|Residuo|Valorizado/No Valorizado|Respel no
-// respel|Total KG|Total M3) — confirmado contra el Sheet real de Gespania,
-// que a diferencia de Euro/Socovesa NO tiene columna Año ni "Tons. CO2eq.
-// evitadas" en esta hoja.
+// numCols=9 (Sucursal|Año|Mes|Residuo|Valorizado/No Valorizado|Respel no
+// respel|Total KG|Total M3|Tons. CO2eq. evitadas) — el cliente YA mandaba
+// el valor de CO2 como 8va columna (generaCO2TR incluye Gespania desde
+// siempre), aunque esa columna no tuviera encabezado visible en el Sheet;
+// se agregó "Año" el 2026-08-31 (a pedido del usuario, misma posicion que
+// Euro/Socovesa: columna B, entre Sucursal y Mes) para que la pestaña FGR
+// del visor separado pueda calcular primer/ultimo registro.
 function writeTotalResiduos(ss, data) {
   var sheet = ss.getSheetByName('Total Residuos');
   if (!sheet) throw new Error('Hoja "Total Residuos" no encontrada');
   var headerRow = buscarFilaEncabezado_(sheet, 'Sucursal');
   if (!headerRow) throw new Error('No se encontro la fila de encabezado ("Sucursal") en Total Residuos');
   var startRow = headerRow + 1;
-  var numCols = 7;
+  var numCols = 9;
   var lastRow = sheet.getLastRow();
   if (lastRow >= startRow) {
     sheet.getRange(startRow, 1, lastRow - startRow + 1, numCols).clearContent();

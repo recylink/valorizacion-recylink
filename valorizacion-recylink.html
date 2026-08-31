@@ -1477,12 +1477,15 @@ function autoSync(rows) {
   });
 
   // Total Residuos (Copec, Abastible, Gespania, Salfa, Euro, Ando y Socovesa): Sucursal | Mes | Residuo | Valorizado/No Valorizado | Respel no respel | Total KG | Total M3 [| Tons. CO2eq. evitadas]
-  // Año (col. B) y Tons. CO2eq. evitadas son exclusivos de Euro/Socovesa y del grupo original
-  // (Copec/Abastible/Gespania/Salfa/Euro/Socovesa) respectivamente — Ando no usa ninguna de las 2.
-  // Socovesa agrego esta hoja despues, con el mismo formato que Euro (ver Code-Socovesa.gs).
+  // Año (col. B) y Tons. CO2eq. evitadas son exclusivos de Euro/Socovesa/Gespania (Año) y del
+  // grupo original (Copec/Abastible/Gespania/Salfa/Euro/Socovesa) respectivamente — Ando no usa
+  // ninguna de las 2. Socovesa agrego esta hoja despues, con el mismo formato que Euro (ver
+  // Code-Socovesa.gs); Gespania agrego la columna Año el 2026-08-31 (a pedido del usuario, para
+  // que la pestaña FGR del visor separado pueda calcular primer/ultimo registro) — mismo lugar
+  // que Euro/Socovesa: columna B, entre Sucursal y Mes.
   var filasTotalResiduos = [];
   if (empresaActual === 'copec' || empresaActual === 'abastible' || empresaActual === 'gespania' || empresaActual === 'salfa' || empresaActual === 'euro' || empresaActual === 'ando' || empresaActual === 'pms' || empresaActual === 'ccu' || empresaActual === 'acciona' || empresaActual === 'socovesa') {
-    var generaAnioTR = empresaActual === 'euro' || empresaActual === 'socovesa';
+    var generaAnioTR = empresaActual === 'euro' || empresaActual === 'socovesa' || empresaActual === 'gespania';
     var generaCO2TR = empresaActual === 'copec' || empresaActual === 'abastible' || empresaActual === 'gespania' || empresaActual === 'salfa' || empresaActual === 'euro' || empresaActual === 'socovesa';
     filasTotalResiduos = totalResiduosRows.map(function(r){
       var row = [r.suc];

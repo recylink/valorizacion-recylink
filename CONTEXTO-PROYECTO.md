@@ -1898,6 +1898,29 @@ operación real, nunca como placeholder vacío. Verificado en vivo: Gespania añ
 2 sucursales ("El Rosal lll", "General Jofre - Fontana" — las únicas con actividad real ese año);
 Copec/Euro/Salfa sin cambios (24/9/2 sucursales respectivamente).
 
+## Columna Año en "Total Residuos" de Gespania (agregado 2026-08-31)
+El usuario preguntó por qué la pestaña FGR del visor separado (`Visor-de-Objetivos-Gespania`)
+no mostraba primer/último registro — `leerTotalResiduos_()` (portado de Socovesa) necesita la
+columna "Año" de la hoja "Total Residuos" para poder ordenar cronológicamente, y Gespania no la
+tenía. A diferencia de las otras 3 hojas (donde Año va entre Mes y Objetivo/Residuo), en
+**Total Residuos el Año va en la columna B, justo después de Sucursal** (mismo lugar que ya
+usan Euro/Socovesa) — se lo señalé al usuario antes de que lo agregara, para no repetir un
+corrimiento.
+
+Una vez agregada la columna:
+- `generaAnioTR` en `autoSync()` ahora incluye `'gespania'` (antes solo euro/socovesa).
+- `writeTotalResiduos()` en `Code-Gespania.gs`: `numCols` pasó de 7 a 9. Detalle encontrado de
+  paso: Gespania YA mandaba el valor de CO2 como 8va columna desde antes (`generaCO2TR` ya la
+  incluía), aunque esa columna no tuviera encabezado visible en el Sheet — con Año agregado, la
+  fila completa queda `Sucursal|Año|Mes|Residuo|Valorizado/No Valorizado|Respel no
+  respel|Total KG|Total M3|Tons. CO2eq. evitadas` (9 columnas).
+- `leerTotalResiduos_()` no necesitó cambios — ya lee por nombre de columna (`headers.indexOf`),
+  agnóstico al orden.
+
+Verificado con la función real `autoSync()` (interceptando `fetch`): la fila sale
+`["Nuncio Ossa", "2026", "Marzo", "Escombro", "No Valorizado", "No respel", 1000, 5, 0.5]` — Año
+en la posición correcta (índice 1, columna B).
+
 ## Cómo verificar sintaxis JS del archivo
 El HTML es un solo archivo con `<script>...</script>` embebido. Para validar sintaxis:
 ```bash
