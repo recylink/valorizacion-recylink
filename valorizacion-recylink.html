@@ -265,6 +265,10 @@ tbody tr:hover{background:var(--surface2)}
       <button id="btn-salud-close" class="salud-close-btn">&times;</button>
     </div>
   </div>
+  <div style="display:flex;align-items:center;gap:8px;padding:0 16px 10px">
+    <label style="font-size:11px;font-weight:600;color:var(--text-muted);white-space:nowrap">A&ntilde;o</label>
+    <select id="f-salud-anio" style="flex:1;padding:5px 8px;font-size:12px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface)"></select>
+  </div>
   <div class="salud-orden-toggle">
     <button id="btn-orden-peor" class="salud-orden-btn active">Peor &rarr; Mejor</button>
     <button id="btn-orden-mejor" class="salud-orden-btn">Mejor &rarr; Peor</button>
@@ -836,7 +840,7 @@ function resolveMetaEmpresa_(companyId, sucursalesList, metaFromSheet) {
 // exacto que el "% global" de renderCopecObjetivos(): promedio de todos los
 // objetivos de emp.objetivos (cada uno 1 unidad, mensual promedia sus meses
 // con dato primero) + el % de valorizacion vs meta como una unidad mas.
-function calcSaludEmpresa_(companyId, data) {
+function calcSaludEmpresa_(companyId, data, anio) {
   var emp = EMPRESAS[companyId];
   var valInfo = parseValorizacionRows_(data.valorizacion);
   var objInfo = parseObjetivosRows_(data.objetivos);
@@ -868,6 +872,11 @@ function calcSaludEmpresa_(companyId, data) {
       Object.keys(objInfo.objBySucMes).forEach(function(k){
         if (k.indexOf(prefix) !== 0) return;
         if (k.slice(k.lastIndexOf('|')+1) !== o.nombre) return;
+        // Solo contar meses del año seleccionado — empresas con historico
+        // multi-año (Gespania, Socovesa, Euro) no deben diluir el promedio
+        // de salud con años que no son el elegido en el panel.
+        var mesKeyK = k.slice(prefix.length, k.lastIndexOf('|'));
+        if (anio && mesKeyK.slice(0,4) !== anio) return;
         var rMes = objInfo.objBySucMes[k];
         if (rMes.estado || rMes.detalle) valsMes.push(scoreObjSalud_(rMes.estado, rMes.detalle));
       });
@@ -886,8 +895,60 @@ function calcSaludEmpresa_(companyId, data) {
 // si fallo la carga de esa empresa. Se llena una vez al abrir la app
 // (cargarSaludTodas) y se puede refrescar a mano.
 var saludPorEmpresa = {};
+// Payload crudo (doGet) de cada empresa, cacheado para poder recalcular al
+// cambiar el selector de Año sin tener que volver a pedirle datos a las 10
+// empresas cada vez — ver cambiarSaludAnio().
+var saludDataPorEmpresa = {};
 var saludCargando = false;
 var saludOrden = 'peor'; // 'peor' (peor a mejor) o 'mejor' (mejor a peor) — default: mostrar primero las que necesitan atencion
+// Año que evalua el panel de salud — por defecto el actual. Independiente
+// del selector de Año de la pestaña Objetivos (ese es por-empresa; este
+// aplica a las 10 empresas del panel a la vez). Empresas sin columna Año
+// (la mayoria hoy) devuelven todo bajo el año actual por el fallback ya
+// existente en parseObjetivosRows_, asi que elegir un año pasado las deja
+// sin objetivos mensuales que promediar para ese año (no rompe nada, solo
+// no aporta datos de esa empresa en un año en que no aplica).
+var saludAnio = String(new Date().getFullYear());
+
+// Recalcula saludPorEmpresa para las 10 empresas usando saludDataPorEmpresa
+// (sin volver a pedir datos) y el saludAnio actual. Se usa al cambiar el
+// selector de Año del panel.
+function recalcularSaludTodas_() {
+  Object.keys(EMPRESAS).forEach(function(id){
+    var data = saludDataPorEmpresa[id];
+    if (!data || data === 'error') return;
+    saludPorEmpresa[id] = calcSaludEmpresa_(id, data, saludAnio);
+  });
+  renderSaludPanel();
+}
+
+// Puebla el selector de Año del panel con los años que efectivamente tengan
+// datos en alguna de las 10 empresas (union de columnas "Año" reales, con
+// fallback al año actual para las empresas que no tengan esa columna) —
+// mismo criterio que sucursalesConDatosEnAnio()/listarAniosDisponibles_.
+function refreshSaludAnioOptions_() {
+  var anios = {};
+  anios[String(new Date().getFullYear())] = true;
+  Object.keys(saludDataPorEmpresa).forEach(function(id){
+    var data = saludDataPorEmpresa[id];
+    if (!data || data === 'error') return;
+    ['valorizacion','trazabilidad','objetivos'].forEach(function(k){
+      (data[k]||[]).forEach(function(r){
+        var a = r && r['Año'];
+        if (a !== undefined && a !== null && a !== '') anios[String(a)] = true;
+      });
+    });
+  });
+  var lista = Object.keys(anios).sort();
+  var sel = document.getElementById('f-salud-anio');
+  if (!sel) return;
+  var actual = saludAnio;
+  sel.innerHTML = lista.map(function(a){ return '<option value="'+a+'"'+(a===actual?' selected':'')+'>'+a+'</option>'; }).join('');
+  if (lista.indexOf(actual) === -1 && lista.length) {
+    saludAnio = lista[lista.length-1];
+    sel.value = saludAnio;
+  }
+}
 
 function cargarSaludTodas() {
   saludCargando = true;
@@ -898,13 +959,16 @@ function cargarSaludTodas() {
       .then(function(r){ return r.json(); })
       .then(function(data){
         data = data || {};
-        saludPorEmpresa[id] = calcSaludEmpresa_(id, data);
+        saludDataPorEmpresa[id] = data;
+        saludPorEmpresa[id] = calcSaludEmpresa_(id, data, saludAnio);
       })
       .catch(function(err){
+        saludDataPorEmpresa[id] = 'error';
         saludPorEmpresa[id] = 'error';
         console.error('Salud '+id+':', err);
       });
   })).then(function(){
+    refreshSaludAnioOptions_();
     saludCargando = false;
     renderSaludPanel();
   });
@@ -3151,7 +3215,9 @@ function guardarObjetivoManual(suc, mesLabel, mesKey, anio, objNombre, estado, d
     return fetch(emp.scriptUrl, {method:'GET', mode:'cors'})
       .then(function(r){ return r.json(); })
       .then(function(data){
-        saludPorEmpresa[companyId] = calcSaludEmpresa_(companyId, data || {});
+        data = data || {};
+        saludDataPorEmpresa[companyId] = data;
+        saludPorEmpresa[companyId] = calcSaludEmpresa_(companyId, data, saludAnio);
         renderSaludPanel();
       });
   }).catch(function(){});
@@ -3494,6 +3560,10 @@ document.getElementById('btn-salud-pin').addEventListener('click', function(){
   saludPinned = !saludPinned;
   try { localStorage.setItem('salud_pinned', saludPinned ? '1' : '0'); } catch(e) {}
   aplicarModoSaludDrawer();
+});
+document.getElementById('f-salud-anio').addEventListener('change', function(){
+  saludAnio = this.value;
+  recalcularSaludTodas_();
 });
 document.getElementById('btn-orden-peor').addEventListener('click', function(){
   saludOrden = 'peor';

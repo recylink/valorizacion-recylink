@@ -1858,6 +1858,32 @@ sucursales con 5% por defecto; al guardar, se generan correctamente 90 filas (10
 años 2018-2026) con el Año en la posición correcta; y la tabla de Objetivos ya muestra
 "Meta val.: 5%" comparado contra el % acumulado real.
 
+## Panel de salud: selector de Año (agregado 2026-08-31)
+A pedido del usuario ("que en el panel de salud solo se evalúen los clientes del año
+seleccionado"). Motivado por el mismo trabajo de año multi-año de Gespania/Socovesa/Euro: antes
+`calcSaludEmpresa_()` promediaba los objetivos mensuales de TODOS los años mezclados (para
+Gespania, 2018-2026 juntos), diluyendo el % de salud con historia vieja en vez de reflejar el
+año que interesa.
+
+- Nuevo `<select id="f-salud-anio">` en el encabezado del panel (arriba del toggle
+  Peor/Mejor), poblado con la unión de valores reales de la columna "Año" encontrados en
+  cualquiera de las 10 empresas (`refreshSaludAnioOptions_()`) + el año actual como piso —
+  empresas sin columna Año simplemente no aportan opciones extra (siguen cayendo bajo el año
+  actual por el fallback ya existente en `parseObjetivosRows_`/`parseValorizacionRows_`).
+- `calcSaludEmpresa_(companyId, data, anio)` ahora recibe el año y filtra el componente de
+  "objetivos mensuales" del promedio (`objBySucMes`) a ese año exacto — el resto (objetivos
+  anuales, % valorización vs. meta vía `ultimoAcum_`) sigue sin filtrarse por año a propósito,
+  mismo criterio que ya se documentó para el % Acumulado ("debe arrastrar años anteriores").
+- `saludDataPorEmpresa` cachea el payload crudo (doGet) de cada empresa por separado de
+  `saludPorEmpresa` (los puntajes ya calculados), para que cambiar el año **recalcule sin
+  volver a pedirle datos a las 10 empresas** (`recalcularSaludTodas_()`, disparado por el
+  `change` del selector). `cargarSaludTodas()` y el auto-refresh de `guardarObjetivoManual()`
+  ahora también alimentan este cache y usan `saludAnio` al calcular.
+
+Verificado en vivo con datos reales: el selector trae los 9 años de Gespania (2018-2026); al
+cambiar de 2026 a 2019 sin recargar, "El Rosal lll" pasa de 28.5% a 3.5% y "General Jofre -
+Fontana" de 43.4% a 15.5% — confirma que el filtro por año efectivamente cambia el cálculo.
+
 ## Cómo verificar sintaxis JS del archivo
 El HTML es un solo archivo con `<script>...</script>` embebido. Para validar sintaxis:
 ```bash
