@@ -88,20 +88,24 @@ function doPost(e) {
   }
 }
 
+// FIX (2026-08-31): esta hoja tiene columna Año (índice 3) desde que se
+// integró la lógica de años de Socovesa — pero el borrado seguía
+// comparando solo por empresa_id+Tipo (índices 0,2), sin mirar el Año. Con
+// una fila "% Real"/"% Acumulado"/"Meta %" POR AÑO (2018...2026, ver
+// autoSync()), sincronizar el año en curso borraba de paso TODOS los años
+// anteriores que compartieran el mismo Tipo — bug real, encontrado al
+// diseñar el soporte de carga parcial (solo el mes nuevo). Se corrigió
+// para borrar solo por empresa_id+Tipo+Año exacto.
 function writeValorizacion(ss, data) {
   const sheet = ss.getSheetByName('♻️ Valorización') || ss.getSheetByName('Valorización');
   if (!sheet) throw new Error('Hoja Valorización no encontrada');
   const startRow = 6;
   const lastRow = sheet.getLastRow();
   if (lastRow >= startRow) {
-    // Borrar por empresa_id+Tipo (no solo empresa_id): si el cliente no manda
-    // la fila "Meta %" (porque todavía no conoce el valor real), esta no debe
-    // borrarse — antes se borraban las 3 filas (% Real/% Acumulado/Meta %) por
-    // cualquier coincidencia de empresa_id, perdiendo la meta ya guardada.
-    const cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 3).getValues();
-    const keys = new Set(data.filas.map(f => f[0] + '|' + f[2]));
+    const cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 4).getValues();
+    const keys = new Set(data.filas.map(f => f[0] + '|' + f[2] + '|' + f[3]));
     const toDelete = [];
-    cols.forEach((r, i) => { if (keys.has(r[0] + '|' + r[2])) toDelete.push(startRow + i); });
+    cols.forEach((r, i) => { if (keys.has(r[0] + '|' + r[2] + '|' + r[3])) toDelete.push(startRow + i); });
     toDelete.reverse().forEach(r => sheet.deleteRow(r));
   }
   const insertRow = sheet.getLastRow() + 1;
@@ -139,16 +143,24 @@ function writeMetas(ss, data) {
   });
 }
 
+// FIX (2026-08-31): mismo problema que writeValorizacion — Trazabilidad_Docs
+// tiene columna Año (índice 3), pero el borrado comparaba solo por
+// empresa_id+Mes. Sincronizar "Marzo" de un año borraba de paso "Marzo" de
+// TODOS los demás años (2018...2026 comparten el mismo texto de mes). Se
+// corrigió para borrar por empresa_id+Mes+Año exacto — todos los residuos
+// de ese mes+año se siguen borrando/reinsertando juntos (autoSync() siempre
+// manda el set completo de residuos de un mes a la vez), solo que ahora sin
+// arrastrar otros años.
 function writeTrazabilidad(ss, data) {
   const sheet = ss.getSheetByName('📊 Trazabilidad_Docs') || ss.getSheetByName('Trazabilidad_Docs');
   if (!sheet) throw new Error('Hoja Trazabilidad_Docs no encontrada');
   const startRow = 6;
   const lastRow = sheet.getLastRow();
   if (lastRow >= startRow) {
-    const cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 3).getValues();
-    const keys = new Set(data.filas.map(f => f[0] + '|' + f[2]));
+    const cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 4).getValues();
+    const keys = new Set(data.filas.map(f => f[0] + '|' + f[2] + '|' + f[3]));
     const toDelete = [];
-    cols.forEach((r, i) => { if (keys.has(r[0] + '|' + r[2])) toDelete.push(startRow + i); });
+    cols.forEach((r, i) => { if (keys.has(r[0] + '|' + r[2] + '|' + r[3])) toDelete.push(startRow + i); });
     toDelete.reverse().forEach(r => sheet.deleteRow(r));
   }
   const insertRow = sheet.getLastRow() + 1;
@@ -157,21 +169,27 @@ function writeTrazabilidad(ss, data) {
   });
 }
 
-// Borra solo las filas cuyo empresa_id+mes+Objetivo coincide exactamente con
-// lo que se esta reinsertando (no por prefijo de empresa completo ni solo
-// por empresa_id+mes), para no perder histórico de objetivos de otras
-// sucursales/meses/objetivos al sincronizar — fix ya aplicado 2026-08-14,
-// mismo criterio que Abastible/Salfa/Euro/Socovesa.
+// Borra solo las filas cuyo empresa_id+Mes+Año+Objetivo coincide exactamente
+// con lo que se esta reinsertando, para no perder histórico de otras
+// sucursales/meses/años/objetivos al sincronizar.
+// FIX (2026-08-14): el borrado original comparaba solo por empresa_id+mes.
+// FIX (2026-08-31): al agregarse la columna Año (índice 3, entre Mes y
+// Objetivo — Objetivo pasó al índice 4), la clave quedó comparando por
+// empresa_id+Mes+AÑO en vez de +Objetivo — sincronizar UN objetivo de un
+// mes borraba TODOS los objetivos de ese mismo mes+año (bug real,
+// encontrado junto con el de Trazabilidad/Valorización). Se corrigió para
+// leer 5 columnas y comparar por los 4 campos reales: empresa_id, Mes, Año
+// y Objetivo (índices 0, 2, 3, 4).
 function writeObjetivos(ss, data) {
   const sheet = ss.getSheetByName('🎯 Objetivos') || ss.getSheetByName('Objetivos');
   if (!sheet) throw new Error('Hoja Objetivos no encontrada');
   const startRow = 6;
   const lastRow = sheet.getLastRow();
   if (lastRow >= startRow) {
-    const cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 4).getValues();
-    const keys = new Set(data.filas.map(f => f[0] + '|' + f[2] + '|' + f[3]));
+    const cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 5).getValues();
+    const keys = new Set(data.filas.map(f => f[0] + '|' + f[2] + '|' + f[3] + '|' + f[4]));
     const toDelete = [];
-    cols.forEach((r, i) => { if (keys.has(r[0] + '|' + r[2] + '|' + r[3])) toDelete.push(startRow + i); });
+    cols.forEach((r, i) => { if (keys.has(r[0] + '|' + r[2] + '|' + r[3] + '|' + r[4])) toDelete.push(startRow + i); });
     toDelete.reverse().forEach(r => sheet.deleteRow(r));
   }
   const insertRow = sheet.getLastRow() + 1;
@@ -197,35 +215,74 @@ function buscarFilaEncabezado_(sheet, valorEsperado) {
   return null;
 }
 
-// Reemplaza TODAS las filas de datos de "Total Residuos" por las que manda
-// el cliente. El cliente siempre envía el set completo vigente (calculado
-// desde el Excel cargado), así que no hace falta borrado selectivo por
-// empresa_id como en writeValorizacion (esta hoja no tiene esa columna).
+// FIX (2026-08-31, a pedido del usuario): antes esto BORRABA TODA LA HOJA
+// (clearContent de punta a punta) y reescribía solo lo que mandara la
+// sesión actual — eso asumía que el cliente siempre manda el set completo
+// de TODOS los meses/años. Con el soporte de carga parcial (subir solo el
+// Excel del mes nuevo, ver processData() en valorizacion-recylink.html),
+// eso hubiera borrado el histórico completo de Total Residuos cada vez que
+// alguien subiera un solo mes. Se cambió a borrado selectivo por
+// Sucursal+Año+Mes exacto (mismo criterio que Trazabilidad_Docs) — todos
+// los residuos de esa sucursal+año+mes se borran/reinsertan juntos (el
+// cliente siempre manda el set completo de residuos DE ESE MES), pero los
+// demás meses/años quedan intactos.
 // numCols=9 (Sucursal|Año|Mes|Residuo|Valorizado/No Valorizado|Respel no
 // respel|Total KG|Total M3|Tons. CO2eq. evitadas) — el cliente YA mandaba
 // el valor de CO2 como 8va columna (generaCO2TR incluye Gespania desde
 // siempre), aunque esa columna no tuviera encabezado visible en el Sheet;
-// se agregó "Año" el 2026-08-31 (a pedido del usuario, misma posicion que
-// Euro/Socovesa: columna B, entre Sucursal y Mes) para que la pestaña FGR
-// del visor separado pueda calcular primer/ultimo registro.
+// se agregó "Año" el 2026-08-31 (misma posicion que Euro/Socovesa: columna
+// B, entre Sucursal y Mes) para que la pestaña FGR del visor separado
+// pueda calcular primer/ultimo registro, y ahora también para el % de
+// valorización acumulado con peso real (ver leerTotalResiduosParaAcum_).
 function writeTotalResiduos(ss, data) {
   var sheet = ss.getSheetByName('Total Residuos');
   if (!sheet) throw new Error('Hoja "Total Residuos" no encontrada');
   var headerRow = buscarFilaEncabezado_(sheet, 'Sucursal');
   if (!headerRow) throw new Error('No se encontro la fila de encabezado ("Sucursal") en Total Residuos');
   var startRow = headerRow + 1;
-  var numCols = 9;
   var lastRow = sheet.getLastRow();
-  if (lastRow >= startRow) {
-    sheet.getRange(startRow, 1, lastRow - startRow + 1, numCols).clearContent();
+  if (lastRow >= startRow && data.filas && data.filas.length > 0) {
+    var cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 3).getValues(); // Sucursal|Año|Mes
+    var keys = new Set(data.filas.map(function (f) { return String(f[0]) + '|' + String(f[1]) + '|' + String(f[2]); }));
+    var toDelete = [];
+    cols.forEach(function (r, i) {
+      var key = String(r[0]) + '|' + String(r[1]) + '|' + String(r[2]);
+      if (keys.has(key)) toDelete.push(startRow + i);
+    });
+    toDelete.reverse().forEach(function (r) { sheet.deleteRow(r); });
   }
   if (data.filas && data.filas.length > 0) {
-    sheet.getRange(startRow, 1, data.filas.length, data.filas[0].length).setValues(data.filas);
+    var insertRow = sheet.getLastRow() + 1;
+    sheet.getRange(insertRow, 1, data.filas.length, data.filas[0].length).setValues(data.filas);
   }
 }
 
 // Lee la hoja RESPEL (Residuo -> TRUE/FALSE) como array de objetos, igual
 // formato que las otras hojas.
+// NUEVO (2026-08-31, a pedido del usuario): el visor nunca podía volver a
+// leer "Total Residuos" — solo se le escribía (writeTotalResiduos), pero el
+// doGet clásico no la exponía. Se agrega para que valorizacion-recylink.html
+// pueda calcular un % Acumulado ponderado por kg/m3 REALES (en vez de la
+// aproximación cruda que promedia %s sin su peso real, ver
+// CONTEXTO-PROYECTO.md).
+function readTotalResiduosSheet_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Total Residuos');
+  if (!sheet) return [];
+  var headerRow = buscarFilaEncabezado_(sheet, 'Sucursal');
+  if (!headerRow) return [];
+  var startRow = headerRow + 1;
+  var lastRow = sheet.getLastRow();
+  if (lastRow < startRow) return [];
+  var headers = sheet.getRange(headerRow, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var data = sheet.getRange(startRow, 1, lastRow - startRow + 1, sheet.getLastColumn()).getValues();
+  return data.filter(function (r) { return r[0] !== ''; }).map(function (r) {
+    var obj = {};
+    headers.forEach(function (h, i) { if (h) obj[h] = r[i]; });
+    return obj;
+  });
+}
+
 function readRespelSheet_() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName('RESPEL');
@@ -1109,7 +1166,8 @@ function doGetClasico_(e) {
     valorizacion: readSheet('♻️ Valorización') || readSheet('Valorización'),
     trazabilidad: readSheet('📊 Trazabilidad_Docs') || readSheet('Trazabilidad_Docs'),
     objetivos: readSheet('🎯 Objetivos') || readSheet('Objetivos'),
-    respel: readRespelSheet_()
+    respel: readRespelSheet_(),
+    totalResiduos: readTotalResiduosSheet_()
   };
 
   return ContentService

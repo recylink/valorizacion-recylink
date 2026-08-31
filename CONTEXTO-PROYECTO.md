@@ -1986,6 +1986,73 @@ solo trae Marzo (Escombro reciclado, 1000kg), tras `processData()` Enero/Febrero
 intactos (`fromSheets:true`) y Marzo se calcula fresco (100%); la fila sincronizada por
 `autoSync()` sale completa: `["% Real", "2026", "2%", "3%", "100%", "", ...]`.
 
+## Gespania: bugs críticos de clave de borrado (destruían datos entre años) — 2026-08-31
+Investigando cómo calcular un % Acumulado ponderado por kg real (ver sección siguiente), se
+encontraron 3 bugs de integridad de datos en `Code-Gespania.gs`, en el patrón "borrar filas que
+matchean la clave, luego insertar las nuevas" que usa cada `write*`. Cuando se agregó la
+columna Año a las hojas, algunas claves de borrado NO se actualizaron para incluirla —
+resultado: sincronizar UN año podía borrar filas de OTRO año que compartían el resto de la
+clave.
+
+- `writeValorizacion`: clave era `id+Tipo` (2 campos) → ahora `id+Tipo+Año` (lee 4 columnas).
+- `writeTrazabilidad`: clave era `id+Mes` → ahora `id+Mes+Año` (lee 4 columnas).
+- `writeObjetivos`: clave era `id+Mes+Año` (el 3er campo del nuevo layout con Año es Año, no
+  Objetivo) → ahora `id+Mes+Año+Objetivo` (lee 5 columnas). Este era el más grave: dos
+  objetivos del mismo mes y año pero distinto texto se pisaban entre sí, y encima cualquier fila
+  de OTRO año con el mismo mes+objetivo se borraba sin querer.
+
+**Nota pendiente, no corregida todavía**: `Code-Euro.gs`'s `writeObjetivos` usa la clave
+`id+Mes+Objetivo` (bien indexada, a diferencia del bug de Gespania) pero tampoco incluye Año —
+o sea que Euro probablemente tiene el mismo riesgo de colisión entre años para Objetivos. No se
+tocó porque no fue pedido, pero conviene aplicar el mismo fix si se confirma el problema.
+
+## Gespania: Total Residuos ya no se borra completo al sincronizar — 2026-08-31
+`writeTotalResiduos` hacía `clearContent()` de todo el rango de datos y reinsertaba todo desde
+cero en cada sync — cualquier sync parcial (solo el mes nuevo) borraba TODOS los meses/años
+anteriores de esa hoja. Se cambió a borrado selectivo por clave `Sucursal+Año+Mes` (igual
+patrón que las otras hojas), preservando lo que no matchea.
+
+También se agregó `readTotalResiduosSheet_()` (mismo patrón que `readRespelSheet_()`: busca la
+fila de encabezado con "Sucursal" y mapea cada fila por nombre de columna) y se conectó al
+`doGetClasico_()` como `totalResiduos: readTotalResiduosSheet_()` — antes esta hoja era de solo
+escritura, ahora el visor puede leerla de vuelta.
+
+**Importante**: estos cambios son solo en el código de `Code-Gespania.gs`. Para que tomen
+efecto en la URL en vivo hay que volver a pegar el archivo completo en el editor de Apps Script
+de Gespania y crear una nueva versión de despliegue (Implementar → Administrar
+implementaciones → Editar → Nueva versión).
+
+## % Acumulado ponderado por kg/m3 real (Total Residuos) — 2026-08-31
+Problema detectado en vivo: `getAcum()` mezclaba, en un solo promedio ponderado, meses ya
+sincronizados desde Sheets (que solo tienen el % final, representado como "100 unidades" de
+peso fijo por mes) con el mes recién subido desde Excel (que sí tiene kg reales). Con
+Enero=80%/Febrero=75% (acumulado real ~77.5%) y una carga chica de Marzo (500kg, 10%
+valorizado), el cálculo daba **29.29%** en vez de un valor realista cercano a 77% — porque los
+meses viejos perdían su magnitud real de kg al colapsarse a "100 unidades" cada uno, mientras
+Marzo (aunque chico) entraba con su peso real y dominaba la mezcla.
+
+Como `Total Residuos` sí guarda kg/m3 reales por mes (y ahora ya no se borra en sync parciales,
+ver arriba, y ahora se puede leer de vuelta vía `doGet`), se puede calcular un acumulado
+correctamente ponderado a partir de ahí:
+
+- Nuevo global cliente `totalResiduosDesdeSheets` (poblado en `loadSheetsData()` desde
+  `data.totalResiduos`, sin resetear en `processData()` — mismo criterio que
+  `acumFromSheets`).
+- Nueva función `kgRealPorMesSuc_(suc)`: combina `totalResiduosRows` (sesión, Excel recién
+  subido, ya en formato `mesKey` "YYYY-MM") con `totalResiduosDesdeSheets` (persistido, formato
+  crudo de la hoja con "Mes" en texto español + "Año" separado — se convierte a `mesKey` vía
+  `MESES_ES`) en un mapa `{mesKey: {total, val}}`. Si un mes está en ambas fuentes gana la
+  sesión actual (recálculo fresco). Usa kg o m3 según la métrica de la empresa (`esEuro ||
+  esAcciona` → m3, el resto → kg — mismo criterio que `metricaVal` en `processData()`).
+- Nueva función `getAcumReal_(suc, upTo, anio)`: suma `total`/`val` de todos los meses ≤ `upTo`
+  (filtrando por año si corresponde) y devuelve `val/total*100`, o `null` si no hay datos.
+- `getAcum()` ahora prioriza: (1) valor exacto cacheado en `acumFromSheets`, (2)
+  `getAcumReal_()` si hay datos de Total Residuos, (3) el fallback crudo anterior (solo para
+  empresas/meses sin ninguna de las dos fuentes).
+
+Esto también corrige de paso el mismo problema de precisión para Euro (que ya sincroniza Total
+Residuos con Año desde antes), no solo Gespania.
+
 ## Cómo verificar sintaxis JS del archivo
 El HTML es un solo archivo con `<script>...</script>` embebido. Para validar sintaxis:
 ```bash

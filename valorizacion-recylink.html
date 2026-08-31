@@ -1019,6 +1019,17 @@ var SUC_ALIAS = {
 
 var empresaActual = 'copec';
 var valMatrix = {}, trazRows = [], sucursales = [], mesesDisp = [], rawRows = [], totalResiduosRows = [], costoIngresoRows = [];
+// "Total Residuos" ya sincronizado (leído del doGet vía loadSheetsData()) —
+// filas crudas {Sucursal, Año, Mes, Residuo, "Valorizado/No Valorizado",
+// "Total KG", ...}. A diferencia de valMatrix/acumFromSheets, esto SI tiene
+// el peso real (kg) de cada mes, no solo un %. Se usa junto con
+// totalResiduosRows (lo recién calculado del Excel de esta sesión) para
+// calcular un % Acumulado ponderado por peso real — ver getAcumReal_().
+// No se reinicia en processData() (mismo motivo que acumFromSheets: solo
+// existen 2 empresas con esta columna hoy, Euro/Socovesa/Gespania, y
+// preservarlo es justamente lo que permite que subir el Excel de un solo
+// mes no arruine el acumulado de los meses anteriores).
+var totalResiduosDesdeSheets = [];
 // Ediciones de objetivos manuales hechas desde el visor en esta sesion (ver
 // "Editar objetivo manual"): companyId -> {anual:{suc|obj:{estado,detalle}},
 // mensual:{suc|mesKey|obj:{estado,detalle}}}. Se mergean sobre el resultado
@@ -1692,13 +1703,74 @@ function getPct(suc,mes){
   if(d.fromSheets) return d.val; // val ya es el porcentaje
   return d.val/d.total*100;
 }
+// Combina totalResiduosRows (recien calculado del Excel de esta sesión) con
+// totalResiduosDesdeSheets (ya sincronizado, leído del doGet) en un mapa
+// {mesKey: {totalKg/totalM3, valKg/valM3}} CON PESO REAL — a diferencia de
+// valMatrix (que para los meses ya sincronizados solo guarda el % final,
+// sin el kg/m3 que lo generó), esto permite ponderar el acumulado
+// correctamente en vez de tratar cada mes viejo como "100 unidades" fijas
+// (ver getAcum() más abajo y CONTEXTO-PROYECTO.md, "% Acumulado ponderado
+// por kg/m3 real"). Si un mes está en AMBAS fuentes, gana la de esta sesión
+// (es el recálculo fresco; la fila del Sheet para ese mismo mes va a quedar
+// reemplazada en el próximo sync de todas formas).
+function kgRealPorMesSuc_(suc) {
+  var esM3 = empresaActual === 'euro' || empresaActual === 'acciona'; // mismo criterio que metricaVal en processData()
+  var porMes = {};
+  totalResiduosDesdeSheets.forEach(function(r){
+    if (((r['Sucursal']||'')+'') !== suc) return;
+    var anio = (r['Año']||'')+'';
+    var mesLabel = (r['Mes']||'')+'';
+    var idxMes = null;
+    Object.keys(MESES_ES).forEach(function(k){ if (MESES_ES[k] === mesLabel) idxMes = k; });
+    if (!anio || idxMes === null) return;
+    var mesKey = anio + '-' + String(idxMes).padStart(2,'0');
+    var cant = parseFloat(esM3 ? r['Total M3'] : r['Total KG']) || 0;
+    var valorizado = ((r['Valorizado/No Valorizado']||'')+'') === 'Valorizado';
+    if (!porMes[mesKey]) porMes[mesKey] = {total:0, val:0};
+    porMes[mesKey].total += cant;
+    if (valorizado) porMes[mesKey].val += cant;
+  });
+  var mesesEnSesion = {};
+  totalResiduosRows.forEach(function(r){ if (r.suc === suc) mesesEnSesion[r.mes] = true; });
+  Object.keys(mesesEnSesion).forEach(function(mesKey){ porMes[mesKey] = {total:0, val:0}; });
+  totalResiduosRows.forEach(function(r){
+    if (r.suc !== suc) return;
+    if (!porMes[r.mes]) porMes[r.mes] = {total:0, val:0};
+    var cant = esM3 ? r.m3 : r.kg;
+    porMes[r.mes].total += cant;
+    if (r.valorizado) porMes[r.mes].val += cant;
+  });
+  return porMes;
+}
+
+// % Acumulado (Enero → upTo) ponderado por kg/m3 real, en vez del "cada mes
+// cuenta como 100 unidades" que usa el fallback de más abajo para meses sin
+// esta información. Devuelve null si no hay ningún dato real disponible
+// (empresa sin hoja "Total Residuos", o sin filas para esos meses).
+function getAcumReal_(suc, upTo, anio) {
+  var porMes = kgRealPorMesSuc_(suc);
+  var total=0, val=0, huboDatos=false;
+  Object.keys(porMes).forEach(function(mesKey){
+    if (anio && mesKey.slice(0,4) !== anio) return;
+    if (mesKey > upTo) return;
+    total += porMes[mesKey].total;
+    val += porMes[mesKey].val;
+    huboDatos = true;
+  });
+  if (!huboDatos || total === 0) return null;
+  return val / total * 100;
+}
+
 function getAcum(suc,upTo,anio){
   // acumFromSheets ya viene indexado por mesKey "YYYY-MM" (año incluido), asi que
   // si hay un valor cacheado para ese mes exacto es siempre correcto usarlo tal
-  // cual, se haya pasado "anio" o no — recalcular a mano (mas abajo) es solo un
-  // fallback para cuando no hay valor de Sheets (ej. datos recien subidos desde
-  // Excel), y ademas es una aproximacion mas cruda (promedio simple de % Real).
+  // cual, se haya pasado "anio" o no.
   if (acumFromSheets[suc] && acumFromSheets[suc][upTo] !== undefined) return acumFromSheets[suc][upTo];
+  // Ponderado por kg/m3 real (Total Residuos) si hay datos — más preciso
+  // que el fallback de abajo, que trata cada mes ya sincronizado como "100
+  // unidades" fijas sin importar cuánto pesó realmente.
+  var real = getAcumReal_(suc, upTo, anio);
+  if (real !== null) return real;
   var tot=0,val=0;
   var hasSheets=false;
   Object.keys(valMatrix[suc]||{}).forEach(function(m){
@@ -2435,6 +2507,7 @@ function loadSheetsData(data) {
   trazRows = [];
   rawRows = [];
   acumFromSheets = {};
+  totalResiduosDesdeSheets = data.totalResiduos || [];
 
   // Cargar hoja "% de avance" de Euro: m2 totales por obra + % Avance manual
   // por obra/mes. Usado para calcular FGR y Ton CO2 evitadas/m2.
