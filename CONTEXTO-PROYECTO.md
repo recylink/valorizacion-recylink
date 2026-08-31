@@ -1830,6 +1830,34 @@ Sheet real. Falta que el usuario vuelva a subir el Excel de Gespania para repobl
 (las borró a propósito) — recién ahí el selector de año del visor nuevo (`Visor-de-Objetivos-
 Gespania`) y el filtro de año de `valorizacion-recylink.html` van a tener años reales para elegir.
 
+**Actualización (2026-08-31, tarde)**: el usuario ya subió el Excel y confirmó que el Año se
+cargó bien (verificado con `curl` contra el doGet real: Trazabilidad/Valorización/Objetivos con
+años reales 2018-2026, sin corrimiento). Encontró un problema nuevo: la fila "Meta %" (5% para
+Gespania) desapareció al limpiar la hoja antes de resubir, y Gespania nunca tuvo botón "Editar
+metas" en el visor (dependía 100% de que alguien escribiera esa fila a mano en el Sheet). A
+pedido del usuario, se agregó el mismo mecanismo que ya usan Copec/Acciona:
+
+- `GESPANIA_META_PCT_DEFAULT = 5`, `getGespaniaMetas()`/`saveGespaniaMetas()` (localStorage
+  `gespania_metas`, mismo patrón `Object.assign({}, default, metasFromSheets, stored||{})` que
+  Acciona) y se sumó `'gespania'` a `getMetasEditablesActuales()`/`saveMetasEditablesActuales()`/
+  `metaDefaultEditable()` y a las 3 condiciones que muestran el botón "✎ Editar metas".
+- `metasActuales` (en `autoSync()`) y `metas` (en `renderCopecObjetivos()`) ahora usan
+  `getGespaniaMetas()` en vez de leer `metasFromSheets` a secas — así el % Valorización vs. meta
+  y la fila "Meta 2026" quedan consistentes con lo que se vea/edite en el botón.
+- **Bug encontrado y corregido de paso**: `syncMetas()` (la función que sincroniza "Editar
+  metas" al Sheet) todavía mandaba el formato viejo sin columna Año — iba a repetir el mismo bug
+  de corrimiento que se acababa de arreglar, esta vez vía el botón de metas. Se corrigió para
+  mandar una fila "Meta %" POR AÑO cuando `EMPRESAS_VAL_CON_ANIO[empresaActual]` (Gespania hoy),
+  con Año en el índice 3 — mismo criterio que ya usa `autoSync()`. Del lado del Apps Script,
+  `writeMetas()` en `Code-Gespania.gs` hacía upsert buscando solo por `empresa_id+Tipo`, lo que
+  hubiera hecho que las ~9 filas (una por año) se pisaran entre sí contra la primera que
+  calzara; se corrigió para hacer match también por Año (`empresa_id+Tipo+Año`).
+
+Verificado en vivo (interceptando `fetch`, sin escribir al Sheet real): el editor muestra las 10
+sucursales con 5% por defecto; al guardar, se generan correctamente 90 filas (10 sucursales × 9
+años 2018-2026) con el Año en la posición correcta; y la tabla de Objetivos ya muestra
+"Meta val.: 5%" comparado contra el % acumulado real.
+
 ## Cómo verificar sintaxis JS del archivo
 El HTML es un solo archivo con `<script>...</script>` embebido. Para validar sintaxis:
 ```bash

@@ -110,6 +110,12 @@ function writeValorizacion(ss, data) {
   });
 }
 
+// FIX (2026-08-31): esta hoja ahora tiene columna Año (indice 3) — el
+// visor manda una fila "Meta %" POR AÑO (ver syncMetas() en
+// valorizacion-recylink.html), asi que hay que hacer match tambien por Año,
+// no solo por empresa_id+Tipo. Sin esto, las ~9 filas de un mismo
+// sucursal (una por año) se hubieran ido pisando entre si contra la
+// primera que calzara por id+Tipo.
 function writeMetas(ss, data) {
   const sheet = ss.getSheetByName('♻️ Valorización') || ss.getSheetByName('Valorización');
   if (!sheet) throw new Error('Hoja Valorización no encontrada');
@@ -119,9 +125,10 @@ function writeMetas(ss, data) {
   const rows = sheet.getRange(startRow, 1, lastRow - startRow + 1, sheet.getLastColumn()).getValues();
   data.filas.forEach(function(fila) {
     const id = fila[0];
+    const anio = fila[3];
     let found = false;
     rows.forEach(function(row, i) {
-      if (row[0] === id && row[2] === 'Meta %') {
+      if (row[0] === id && row[2] === 'Meta %' && String(row[3]) === String(anio)) {
         sheet.getRange(startRow + i, 1, 1, fila.length).setValues([fila]);
         found = true;
       }
