@@ -1260,10 +1260,34 @@ document.getElementById('file-input').addEventListener('change', function(e) {
 
 function processData(rows, fname) {
   rawRows = rows;
-  valMatrix = {};
+  // OJO (2026-08-31, a pedido del usuario): antes esto reiniciaba valMatrix
+  // y acumFromSheets por completo, así que si el Excel que se sube NO
+  // incluye TODOS los meses ya sincronizados (ej. solo trae el mes nuevo,
+  // no el año completo), el sync que sigue mandaba la fila "% Real"/
+  // "% Acumulado" con esos meses en blanco — no se "borraban" como filas,
+  // pero la fila completa se reescribía perdiendo esos valores. Ahora se
+  // preservan las entradas que ya estaban cargadas desde Sheets
+  // (fromSheets:true, puestas por loadSheetsData()) — así subir solo el
+  // Excel del mes nuevo es seguro SIEMPRE QUE antes se haya usado
+  // "Cargar desde Sheets" en la misma sesión. Los meses que sí traiga el
+  // Excel nuevo se recalculan igual desde cero (ver mas abajo, donde se
+  // limpia el placeholder fromSheets antes de acumular).
+  var valMatrixDesdeSheets = {};
+  Object.keys(valMatrix).forEach(function(suc){
+    Object.keys(valMatrix[suc]).forEach(function(mesKey){
+      if (valMatrix[suc][mesKey].fromSheets) {
+        valMatrixDesdeSheets[suc] = valMatrixDesdeSheets[suc] || {};
+        valMatrixDesdeSheets[suc][mesKey] = valMatrix[suc][mesKey];
+      }
+    });
+  });
+  valMatrix = valMatrixDesdeSheets;
   totalResiduosRows = [];
   costoIngresoRows = [];
-  acumFromSheets = {};
+  // acumFromSheets NO se reinicia a proposito, mismo motivo que valMatrix
+  // arriba — getAcum() ya prioriza acumFromSheets por sobre el recalculo
+  // desde valMatrix, asi que los meses que no vengan en este Excel siguen
+  // usando el % Acumulado que ya estaba cargado desde Sheets.
   var trazMap = {};
   var trMap = {}; // Sucursal+Mes+Residuo+Valorizado+Respel -> {kg,m3} (Copec y Abastible, alimenta Total Residuos)
   var emp = EMPRESAS[empresaActual];
@@ -1310,7 +1334,12 @@ function processData(rows, fname) {
     }
 
     if (!valMatrix[suc]) valMatrix[suc]={};
-    if (!valMatrix[suc][mes]) valMatrix[suc][mes]={total:0,val:0};
+    // Si este mes vino heredado de Sheets (fromSheets:true, ver arriba) y el
+    // Excel SI trae operaciones reales para el, hay que limpiarlo primero —
+    // si no, la acumulacion de mas abajo (total+=/val+=) sumaria kg/m3
+    // crudos sobre un placeholder que en realidad guardaba un % ya
+    // calculado (total:100, val:pct), dando un numero sin sentido.
+    if (!valMatrix[suc][mes] || valMatrix[suc][mes].fromSheets) valMatrix[suc][mes]={total:0,val:0};
     // Copec: excluir Respel del calculo de % valorizacion (Total Residuos es la fuente de verdad).
     // Abastible SI genera Total Residuos pero mantiene el % de valorizacion sin excluir Respel.
     // Excavacion se excluye del % de valorizacion en todos los casos (todas las empresas).

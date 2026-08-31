@@ -1956,6 +1956,36 @@ criterio que ya usa `valorizacion-recylink.html` para "% Valorización vs. meta"
 meta" para no perder los números crudos. Verificado: con acumulado=0.7%/meta=5% da
 `{avance:14, meta:100, ok:false}`.
 
+## Subir el Excel de un solo mes ya no borra los meses anteriores (agregado 2026-08-31)
+El usuario preguntó si subir el Excel del mes nuevo (en vez del acumulado completo) borraba la
+información existente. Investigando: **para Trazabilidad_Docs y Objetivos, no** (cada fila es
+por mes, un Excel parcial nunca toca meses que no trae). **Para Valorización sí había un riesgo
+real**: `processData()` (se dispara al subir un Excel) reiniciaba `valMatrix` y
+`acumFromSheets` por completo en cada carga — así que si el Excel nuevo no traía TODOS los
+meses ya sincronizados, la fila "% Real"/"% Acumulado" de ese año (una sola fila con los 12
+meses adentro) se reescribía completa, dejando en blanco los meses que el Excel nuevo no traía
+— no se "borraban" como filas sueltas, pero la información se perdía igual.
+
+El usuario pidió poder subir solo el mes nuevo, así que se corrigió `processData()`:
+- En vez de reiniciar `valMatrix` a `{}`, ahora preserva las entradas que ya estaban cargadas
+  desde Sheets (`fromSheets:true`, las pone `loadSheetsData()`) — el resto sí se reinicia
+  normal.
+- `acumFromSheets` ya no se reinicia en absoluto (`getAcum()` ya prioriza este valor por sobre
+  el recálculo desde `valMatrix`, así que no hace falta tocarlo).
+- Al acumular kg/m3 reales del Excel para un mes que estaba heredado como `fromSheets:true`, se
+  limpia primero (`if (!valMatrix[suc][mes] || valMatrix[suc][mes].fromSheets)`) para no sumar
+  kilos crudos sobre un placeholder que en realidad guardaba un % ya calculado.
+
+**Requisito para que funcione**: hay que usar "Cargar desde Sheets" ANTES de subir el Excel del
+mes nuevo, en la misma sesión — así `valMatrix`/`acumFromSheets` ya tienen los meses anteriores
+cargados para que `processData()` los preserve. Si se sube el Excel sin cargar desde Sheets
+primero, el comportamiento es el de siempre (sin meses previos que preservar).
+
+Verificado en vivo: con Enero=2%/Febrero=3% ya cargados desde Sheets (simulado) y un Excel que
+solo trae Marzo (Escombro reciclado, 1000kg), tras `processData()` Enero/Febrero quedan
+intactos (`fromSheets:true`) y Marzo se calcula fresco (100%); la fila sincronizada por
+`autoSync()` sale completa: `["% Real", "2026", "2%", "3%", "100%", "", ...]`.
+
 ## Cómo verificar sintaxis JS del archivo
 El HTML es un solo archivo con `<script>...</script>` embebido. Para validar sintaxis:
 ```bash
