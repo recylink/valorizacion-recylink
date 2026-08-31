@@ -1805,6 +1805,31 @@ en la posición de "Año", con Insertar columna — no solo escribir el texto "A
 encabezado) — no se intentó arreglar automáticamente por ser una edición directa de datos en vivo
 de un Sheet ajeno.
 
+**Actualización (2026-08-31)**: el usuario corrigió el encabezado de las 3 hojas (confirmado
+visualmente: `Trazabilidad_Docs`, `♻️ Valorización` y `🎯 Objetivos` ahora tienen "Año" como
+columna propia, en el mismo orden que Euro para Trazabilidad_Docs — Sucursal, Mes, Año, Residuo,
+Código LER, Importaciones, Cert. tratamiento, Factura, Cert. declaración, Transportista,
+Disposición final) y borró a mano todas las filas de datos viejas (decisión propia, para volver a
+subir el Excel sobre una base limpia — no fue una pérdida accidental).
+
+Con la estructura ya confirmada, se agregó Gespania a la sincronización con Año en
+`valorizacion-recylink.html`:
+- `EMPRESAS_OBJ_CON_ANIO` y `EMPRESAS_VAL_CON_ANIO`: se agregó `gespania:1` (mismo formato de fila
+  que Euro/Socovesa para Objetivos y Valorización).
+- Trazabilidad_Docs: se agregó `esGespaniaTraz` en `autoSync()`, compartiendo la MISMA rama que
+  Euro (`esEuroTraz || esGespaniaTraz`) — no la de Socovesa, que tiene un orden de columnas
+  distinto (sin "Factura", con "Transportista" pegado al Residuo). Gespania calza exacto con el
+  orden de Euro.
+- La lectura (`loadSheetsData`, `parseObjetivosRows_`, etc.) no necesitó ningún cambio: ya lee por
+  nombre de columna (`row['Año']`) de forma genérica para cualquier empresa.
+
+Verificado con la función real `autoSync()` (interceptando `fetch`, sin escribir de prueba al
+Sheet real): la fila de Trazabilidad y las 3 filas de Valorización (% Real/% Acumulado/Meta %)
+salen con el Año en la posición correcta, calzando con el layout confirmado visualmente en el
+Sheet real. Falta que el usuario vuelva a subir el Excel de Gespania para repoblar las 3 hojas
+(las borró a propósito) — recién ahí el selector de año del visor nuevo (`Visor-de-Objetivos-
+Gespania`) y el filtro de año de `valorizacion-recylink.html` van a tener años reales para elegir.
+
 ## Cómo verificar sintaxis JS del archivo
 El HTML es un solo archivo con `<script>...</script>` embebido. Para validar sintaxis:
 ```bash

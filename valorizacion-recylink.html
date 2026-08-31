@@ -551,13 +551,16 @@ var META_VAL_OBJ_NOMBRE = '% Valorización vs. meta';
 // columnas, el Objetivo corre al indice 4) en vez del formato original de 6
 // columnas (sin Año, Objetivo en el indice 3). Euro la tiene desde que se
 // integro; Socovesa la agrego despues (ver Code-Socovesa.gs, FIX 5
-// 2026-08-28) — cualquier fila de objetivos que el visor sincronice para
-// estas empresas debe incluir el Año o queda todo corrido una columna.
-var EMPRESAS_OBJ_CON_ANIO = {euro:1, socovesa:1};
-// Mismo caso para la hoja "♻️ Valorización": Euro y Socovesa tienen una
-// columna Año agregada (empresa_id, Sucursal, Tipo, Año, ene%, feb%, ...)
-// en vez del formato original sin Año — ver Code-Socovesa.gs FIX 3.
-var EMPRESAS_VAL_CON_ANIO = {euro:1, socovesa:1};
+// 2026-08-28); Gespania la agrego el 2026-08-31 (misma logica de años que
+// Socovesa, a pedido del usuario) — cualquier fila de objetivos que el
+// visor sincronice para estas empresas debe incluir el Año o queda todo
+// corrido una columna.
+var EMPRESAS_OBJ_CON_ANIO = {euro:1, socovesa:1, gespania:1};
+// Mismo caso para la hoja "♻️ Valorización": Euro, Socovesa y (desde
+// 2026-08-31) Gespania tienen una columna Año agregada (empresa_id,
+// Sucursal, Tipo, Año, ene%, feb%, ...) en vez del formato original sin
+// Año — ver Code-Socovesa.gs FIX 3.
+var EMPRESAS_VAL_CON_ANIO = {euro:1, socovesa:1, gespania:1};
 
 var ABASTIBLE_METAS = {
   'Planta Concón': 15,
@@ -1403,8 +1406,15 @@ function autoSync(rows) {
   // proxima vez que se re-suba el Excel de ese mes, porque writeTrazabilidad
   // borra por empresa_id+mes exacto antes de reinsertar.
   var esSocovesaTraz = empresaActual === 'socovesa';
+  // Gespania agrego su columna Año en Trazabilidad_Docs el 2026-08-31, con el
+  // MISMO orden de columnas que Euro (confirmado visualmente contra el Sheet
+  // real: Sucursal, Mes, Año, Residuo, Código LER, Importaciones, Cert.
+  // tratamiento, Factura, Cert. declaración, Transportista, Disposición
+  // final) — a diferencia de Socovesa, que no tiene "Factura" y tiene otro
+  // orden. Por eso comparte la misma rama que Euro en vez de la de Socovesa.
+  var esGespaniaTraz = empresaActual === 'gespania';
   var filasTraz = trazRows.map(function(r){
-    if (esEuroTraz) {
+    if (esEuroTraz || esGespaniaTraz) {
       return [sucId(r.suc), r.suc, MESES_ES[parseInt(r.mes.slice(5))], r.mes.slice(0,4), r.residuo, r.ler, r.imp, r.cert, r.factura, r.decl, r.transp, r.disp];
     }
     if (esSocovesaTraz) {
