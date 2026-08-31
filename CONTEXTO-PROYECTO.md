@@ -1884,6 +1884,20 @@ Verificado en vivo con datos reales: el selector trae los 9 años de Gespania (2
 cambiar de 2026 a 2019 sin recargar, "El Rosal lll" pasa de 28.5% a 3.5% y "General Jofre -
 Fontana" de 43.4% a 15.5% — confirma que el filtro por año efectivamente cambia el cálculo.
 
+**Bug reportado por el usuario, corregido el mismo día**: "en Gespania me aparecen 10
+sucursales cuando quiero que sean solo 2". El selector de Año ya filtraba el PUNTAJE, pero no
+la LISTA de sucursales — `calcSaludEmpresa_` seguía listando las 10 sucursales de siempre. Causa
+real: `autoSync()` sincroniza una fila "% Real"/"% Acumulado"/"Meta %" por CADA año de
+`aniosDisp` para TODAS las sucursales (aunque esa sucursal no tenga ningún dato ese año — los
+meses quedan vacíos, y "Meta %" ni siquiera depende de tener datos reales). Filtrar solo por
+"¿existe una fila de Valorización con ese Año?" contaba las 10 igual. Se corrigió agregando el
+mismo criterio que ya usa `sucursalesConDatosEnAnio()` del visor principal: solo cuenta una fila
+`Tipo==='% Real'` si además tiene **al menos un mes con valor no vacío** (`anioDeFila_()` nuevo,
+compartido). Trazabilidad no necesitó este ajuste — esas filas solo se crean cuando hubo una
+operación real, nunca como placeholder vacío. Verificado en vivo: Gespania año 2026 pasó de 10 a
+2 sucursales ("El Rosal lll", "General Jofre - Fontana" — las únicas con actividad real ese año);
+Copec/Euro/Salfa sin cambios (24/9/2 sucursales respectivamente).
+
 ## Cómo verificar sintaxis JS del archivo
 El HTML es un solo archivo con `<script>...</script>` embebido. Para validar sintaxis:
 ```bash

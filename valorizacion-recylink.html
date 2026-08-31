@@ -792,6 +792,15 @@ function parseValorizacionRows_(valorizacionRows) {
   return {sucursales:Object.keys(sucursalesSet), metaFromSheet:metaFromSheet, acumBySuc:acumBySuc};
 }
 
+// Año efectivo de una fila cruda (valorizacion/trazabilidad/objetivos del
+// doGet): la columna "Año" si existe, o el año actual como fallback — mismo
+// criterio usado en todo el sistema (parseValorizacionRows_,
+// parseObjetivosRows_, loadSheetsData) para empresas sin esa columna.
+function anioDeFila_(r) {
+  var a = r && r['Año'];
+  return (a !== undefined && a !== null && a !== '') ? String(a) : String(new Date().getFullYear());
+}
+
 // Ultimo % acumulado disponible (mes mas reciente) para una sucursal.
 function ultimoAcum_(acumBySuc, suc) {
   var d = acumBySuc[suc];
@@ -853,10 +862,39 @@ function calcSaludEmpresa_(companyId, data, anio) {
     Object.assign(objInfo.objBySucMes, edits.mensual);
   }
 
+  // Sucursales a evaluar: si se pasa un año, solo las que tengan datos reales
+  // de Valorización o Trazabilidad EN ESE AÑO (mismo criterio que
+  // sucursalesConDatosEnAnio() del visor de Objetivos) — para empresas con
+  // historico multi-año (Gespania, Socovesa, Euro) esto evita listar obras
+  // que ya no tienen actividad en el año elegido. Sin año (llamada vieja),
+  // se mantiene el comportamiento anterior: todas las sucursales vistas
+  // alguna vez. Los objetivos "Anual" (sin columna Año) no se usan para
+  // esta decision — misma limitacion ya documentada para el visor principal.
+  //
+  // OJO: autoSync() sincroniza una fila "% Real"/"% Acumulado"/"Meta %" por
+  // CADA año de aniosDisp para TODAS las sucursales (aunque esa sucursal en
+  // particular no tenga ningun dato ese año — los meses quedan vacios). Por
+  // eso no basta con que exista una fila de Valorización con ese Año: hay
+  // que exigir ademas que sea tipo "% Real" y tenga al menos un mes con
+  // valor real (mismo filtro que ya usa sucursalesConDatosEnAnio()/
+  // valMatrix). Trazabilidad si sirve con solo mirar el Año, porque esas
+  // filas solo se crean cuando hubo una operacion real ese mes.
   var sucSet = {};
-  valInfo.sucursales.forEach(function(s){ sucSet[s] = true; });
-  (data.trazabilidad||[]).forEach(function(r){ var s=((r['Sucursal']||r[1]||'')+'').trim(); if(s) sucSet[s]=true; });
-  (data.objetivos||[]).forEach(function(r){ var s=((r['Sucursal']||r[1]||'')+'').trim(); if(s) sucSet[s]=true; });
+  if (anio) {
+    (data.valorizacion||[]).forEach(function(r){
+      var tipo = (r['Tipo']||r[2]||'')+'';
+      if (tipo !== '% Real') return;
+      var s=((r['Sucursal']||r[1]||'')+'').trim();
+      if (!s || anioDeFila_(r)!==anio) return;
+      var tieneValor = Object.keys(MESES_ES).some(function(k){ var v=r[MESES_ES[k]]; return v!==undefined && v!==null && v!==''; });
+      if (tieneValor) sucSet[s]=true;
+    });
+    (data.trazabilidad||[]).forEach(function(r){ var s=((r['Sucursal']||r[1]||'')+'').trim(); if(s && anioDeFila_(r)===anio) sucSet[s]=true; });
+  } else {
+    valInfo.sucursales.forEach(function(s){ sucSet[s] = true; });
+    (data.trazabilidad||[]).forEach(function(r){ var s=((r['Sucursal']||r[1]||'')+'').trim(); if(s) sucSet[s]=true; });
+    (data.objetivos||[]).forEach(function(r){ var s=((r['Sucursal']||r[1]||'')+'').trim(); if(s) sucSet[s]=true; });
+  }
   var sucursalesList = Object.keys(sucSet).filter(function(s){ return !isSucExcluidaParaSalud_(companyId, s); });
 
   return sucursalesList.map(function(suc){
