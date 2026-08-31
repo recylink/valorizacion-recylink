@@ -1774,6 +1774,37 @@ probar en vivo contra el Sheet real (a diferencia de los cambios en `valorizacio
 que se sirven directos); se recomienda correr `testBuildPayload()` y `testReadMinutas()` desde el
 editor después de pegarlo, para confirmar que no hay un nombre de columna que no calce.
 
+**Actualización (2026-08-31)**: el usuario ya desplegó el `Code-Gespania.gs` de arriba (el backend
+real de `?visor=1` ya devuelve `ANIOS_DISPONIBLES`/`TODAS_OBRAS_FGR`/objetivos reales — confirmado
+con `curl`/`fetch` directo contra la URL real). También pidió actualizar el frontend separado —
+repo `recylink/Visor-de-Objetivos-Gespania` (GitHub Pages, `https://recylink.github.io/
+Visor-de-Objetivos-Gespania/`), clonado en `Desktop/Visor-de-Objetivos-Gespania` — para que se vea
+igual que `recylink/socovesa-trazabilidad` (clonado en `Desktop/socovesa-trazabilidad`). Se
+reemplazó su `index.html` completo por el `index.html` actual de Socovesa, re-parametrizado:
+`EMPRESA_NOMBRE`/`EMPRESA_COLOR`/`EMPRESA_COLOR_L`, `DATA_SOURCE_URL` (scriptUrl real de
+Gespania), `FGR_M2_LS_KEY`, `MN_SHEET_ID` (planilla de Gespania), `MN_LS_SCRIPT`/`MN_LS_DATA`
+(namespacing de localStorage). Los arreglos `DOC_COLS`/`DOCS_RES`/`DOCS_TRAZO*` ya eran idénticos
+entre ambas empresas, no requirieron cambio. Commit `043fc16` en ese repo, subido a `main`
+(GitHub Pages se actualiza solo).
+
+**Bug real encontrado en la Sheet de Gespania al probar contra el backend real (no es un bug de
+código, es un problema de datos)**: la hoja `📊 Trazabilidad_Docs` tiene la columna "Año" agregada
+como **encabezado suelto** en la fila 5, sin haber insertado una columna real que empuje los datos
+— o sea, la fila de encabezados dice `..., Mes, Año, Residuo, Código LER, ...` pero las filas de
+datos siguen teniendo `..., Mes, [Residuo real], [Código LER real], ...` una posición más a la
+izquierda. Resultado confirmado con `curl` contra el doGet real: la columna "Año" devuelve nombres
+de residuo (ej. "Escombro") y la columna "Residuo" queda vacía — todo lo que sigue a la derecha
+también corrido. Esto afecta tanto al visor nuevo (selector de año muestra residuos en vez de
+años) como potencialmente a `valorizacion-recylink.html` cuando lee Gespania desde Sheets (no
+subiendo Excel fresco), porque ese lector también es por nombre de columna. **La hoja
+`🎯 Objetivos` SÍ está bien alineada** (verificado con filas reales — Objetivo/% cumplimiento/
+Detalle calzan). Sin verificar del todo `♻️ Valorización` (hay indicios de una columna extra sin
+nombre al final, con valores que deberían estar en un mes real). **Esto requiere que alguien
+corrija la hoja `📊 Trazabilidad_Docs` directamente en Google Sheets** (insertar una columna real
+en la posición de "Año", con Insertar columna — no solo escribir el texto "Año" en una celda del
+encabezado) — no se intentó arreglar automáticamente por ser una edición directa de datos en vivo
+de un Sheet ajeno.
+
 ## Cómo verificar sintaxis JS del archivo
 El HTML es un solo archivo con `<script>...</script>` embebido. Para validar sintaxis:
 ```bash
