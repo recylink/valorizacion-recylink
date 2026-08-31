@@ -894,12 +894,27 @@ function construirEmpresas_(traza, val, cse, objetivosPorEmpresa, objetivosMaest
     (objetivosMaestro || []).forEach(function (textoMaestro) {
       if (/trazabilidad/i.test(textoMaestro)) return; // ya está cubierta arriba
       if (esObjetivoValorizacionPct_(textoMaestro)) {
+        // El front-end (renderObjetivos()) muestra "avance + '%'" tal cual
+        // como texto y asume meta=100 para el resto de los objetivos (FGR,
+        // SINADER, trazabilidad — donde avance YA es un % de cumplimiento
+        // 0-100). Para no mostrar el % de valorización crudo (ej. "0.7%"
+        // cuando la meta es 5%, que se leería como que falta un monton en
+        // vez de que ya se logro un 14% de la meta), se convierte acá mismo
+        // a la misma escala: avance = % de la meta ya alcanzado (0-100,
+        // tope 100), meta = 100. Mismo criterio que usa
+        // valorizacion-recylink.html para "% Valorización vs. meta"
+        // (Math.min(100, acum/meta*100)).
+        var pctDeMeta = (metaVal !== null && metaVal > 0 && avanceVal !== null)
+          ? Math.min(100, Math.round((avanceVal / metaVal) * 100))
+          : null;
         objetivos.push({
           texto: textoMaestro,
-          avance: avanceVal,
+          avance: pctDeMeta,
           ok: (metaVal !== null && avanceVal !== null) ? (avanceVal >= metaVal) : null,
-          meta: metaVal !== null ? metaVal : 100,
-          detalle: ""
+          meta: 100,
+          detalle: (metaVal !== null && avanceVal !== null)
+            ? (avanceVal + '% acumulado de ' + metaVal + '% meta')
+            : ""
         });
         yaSeMostroValorizacionPct = true;
         return;

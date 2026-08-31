@@ -1944,6 +1944,18 @@ Script): con acumulado=0.7% y meta=5%, el objetivo "valorizar un 5% de residuos 
 `{avance:0.7, meta:5, ok:false}` en vez de `{avance:null, meta:100, ok:null}`, y la tarjeta
 "X% Valorización" ya no aparece duplicada en la lista.
 
+**Corrección el mismo día**: el usuario notó que 0,7/5 = 0,14 (14%) no se veía reflejado. Causa:
+el front-end (`renderObjetivos()` en el `index.html` del visor) muestra `avance + "%"` tal cual
+como texto, y asume `meta=100` para todos los demás objetivos (FGR, SINADER, trazabilidad, donde
+`avance` YA es un % de cumplimiento 0-100). Mandar `avance:0.7, meta:5` (los números crudos) no
+sigue esa convención — el texto mostraba literalmente "0.7%" en vez del 14% de avance hacia la
+meta. Se corrigió `esObjetivoValorizacionPct_` para convertir a la misma escala que usa el resto
+del sistema: `avance = Math.min(100, Math.round(acumulado/meta*100))`, `meta:100` fijo — mismo
+criterio que ya usa `valorizacion-recylink.html` para "% Valorización vs. meta"
+(`Math.min(100, acum/meta*100)`). El `detalle` ahora dice explícitamente "X% acumulado de Y%
+meta" para no perder los números crudos. Verificado: con acumulado=0.7%/meta=5% da
+`{avance:14, meta:100, ok:false}`.
+
 ## Cómo verificar sintaxis JS del archivo
 El HTML es un solo archivo con `<script>...</script>` embebido. Para validar sintaxis:
 ```bash
