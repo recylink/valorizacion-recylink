@@ -1240,6 +1240,36 @@ function resetData() {
 // se leen todos y sus filas se combinan en un solo arreglo antes de
 // procesarlas, como si fuera un unico Excel consolidado (mismo criterio que
 // ya usa el resto del sistema, que siempre trabaja sobre rawRows completo).
+// Antes de procesar un Excel subido, precarga en silencio (sin tocar el
+// dot/mensaje de sync ni mostrar toasts) lo que ya está sincronizado en el
+// Sheet, para que processData() pueda preservar los meses Y sucursales
+// históricos que el Excel nuevo no trae (ver el comentario dentro de
+// processData()). Antes de este fix, ese resguardo dependía de que el
+// usuario usara "Cargar desde Sheets" A MANO justo antes de subir el Excel
+// del mes nuevo — si no lo hacía (el caso normal: solo se sube el Excel),
+// tanto los meses como las sucursales que no vinieran en ese Excel se
+// perdían de `sucursales`/`valMatrix` y la fila "% Real" sincronizada
+// después quedaba incompleta. Cualquier error (Sheet vacío en un cliente
+// nuevo, sin scriptUrl configurado, sin conexión) se ignora en silencio —
+// el upload sigue funcionando igual que antes de este fix, simplemente sin
+// el resguardo de datos históricos.
+function precargarDesdeSheetsSilencioso_() {
+  var emp = EMPRESAS[empresaActual];
+  if (!emp || !emp.scriptUrl) return Promise.resolve();
+  var empresaAlIniciar = empresaActual;
+  return fetch(emp.scriptUrl, {method:'GET', mode:'cors'})
+    .then(function(r){ return r.json(); })
+    .then(function(data) {
+      if (empresaActual !== empresaAlIniciar || !data) return;
+      data.valorizacion = data.valorizacion || [];
+      data.trazabilidad = data.trazabilidad || [];
+      data.objetivos = data.objetivos || [];
+      if (!data.valorizacion.length && !data.trazabilidad.length) return;
+      loadSheetsData(data);
+    })
+    .catch(function(){ /* silencioso, ver comentario arriba */ });
+}
+
 document.getElementById('file-input').addEventListener('change', function(e) {
   var files = Array.prototype.slice.call(e.target.files || []);
   if (!files.length) return;
@@ -1263,7 +1293,9 @@ document.getElementById('file-input').addEventListener('change', function(e) {
   if (files.length > 1) toast('Leyendo ' + files.length + ' archivos Excel...');
   Promise.all(files.map(leerArchivo)).then(function(filasPorArchivo) {
     var filas = [].concat.apply([], filasPorArchivo);
-    processData(filas, files.map(function(f){ return f.name; }).join(', '));
+    return precargarDesdeSheetsSilencioso_().then(function(){
+      processData(filas, files.map(function(f){ return f.name; }).join(', '));
+    });
   }).catch(function(err) {
     toast('Error al leer Excel: ' + err.message, 'err');
   });

@@ -130,17 +130,24 @@ function writeValorizacion(ss, data) {
   });
 }
 
+// FIX (2026-08-31): la hoja 📊 Trazabilidad_Docs tiene columna Año en D
+// (Sucursal, Mes, Año, Residuo, ...) pero el borrado seguia comparando solo
+// por empresa_id+mes (indices 0,2) sin incluir el Año (indice 3) — al
+// sincronizar CUALQUIER mes se borraban de paso las filas de ESE MISMO mes
+// de TODOS los años anteriores, no solo el año que se estaba resincronizando
+// (mismo bug ya encontrado y corregido en Code-Gespania.gs). Se corrigio
+// para leer 4 columnas y comparar por empresa_id+mes+año.
 function writeTrazabilidad(ss, data) {
   const sheet = ss.getSheetByName('📊 Trazabilidad_Docs') || ss.getSheetByName('Trazabilidad_Docs');
   if (!sheet) throw new Error('Hoja Trazabilidad_Docs no encontrada');
   const startRow = 6;
   const lastRow = sheet.getLastRow();
   if (lastRow >= startRow) {
-    const cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 3).getValues();
-    const keys = new Set(data.filas.map(f => f[0] + '|' + f[2]));
+    const cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 4).getValues();
+    const keys = new Set(data.filas.map(f => f[0] + '|' + f[2] + '|' + f[3]));
     const toDelete = [];
     cols.forEach((r, i) => {
-      if (keys.has(r[0] + '|' + r[2])) toDelete.push(startRow + i);
+      if (keys.has(r[0] + '|' + r[2] + '|' + r[3])) toDelete.push(startRow + i);
     });
     toDelete.reverse().forEach(r => sheet.deleteRow(r));
   }
@@ -167,6 +174,13 @@ function writeTrazabilidad(ss, data) {
 // empresa_id+mes+Objetivo en los índices reales (0, 2, 4) — mismo fix ya
 // aplicado en Code-Euro.gs (ver comentario ahí: "en Euro la columna D es
 // Año... el texto del Objetivo queda en la columna E, índice 4").
+//
+// FIX 6 (2026-08-31): la clave del FIX 5 (empresa_id+mes+Objetivo) dejó de
+// incluir el Año — mismo texto de objetivo en el mismo mes pero de OTRO año
+// se borraba igual al resincronizar (mismo bug ya encontrado y corregido en
+// Code-Gespania.gs). Se agrega el Año de vuelta a la clave, ahora junto con
+// el Objetivo (empresa_id+mes+año+Objetivo), para no repetir el bug original
+// del FIX 5 (año solo, sin Objetivo).
 function writeObjetivos(ss, data) {
   const sheet = ss.getSheetByName('🎯 Objetivos') || ss.getSheetByName('Objetivos');
   if (!sheet) throw new Error('Hoja Objetivos no encontrada');
@@ -174,9 +188,9 @@ function writeObjetivos(ss, data) {
   const lastRow = sheet.getLastRow();
   if (lastRow >= startRow) {
     const cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 5).getValues();
-    const keys = new Set(data.filas.map(f => f[0] + '|' + f[2] + '|' + f[4]));
+    const keys = new Set(data.filas.map(f => f[0] + '|' + f[2] + '|' + f[3] + '|' + f[4]));
     const toDelete = [];
-    cols.forEach((r, i) => { if (keys.has(r[0] + '|' + r[2] + '|' + r[4])) toDelete.push(startRow + i); });
+    cols.forEach((r, i) => { if (keys.has(r[0] + '|' + r[2] + '|' + r[3] + '|' + r[4])) toDelete.push(startRow + i); });
     toDelete.reverse().forEach(r => sheet.deleteRow(r));
   }
   const insertRow = sheet.getLastRow() + 1;

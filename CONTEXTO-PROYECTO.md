@@ -2053,6 +2053,50 @@ correctamente ponderado a partir de ahí:
 Esto también corrige de paso el mismo problema de precisión para Euro (que ya sincroniza Total
 Residuos con Año desde antes), no solo Gespania.
 
+## Socovesa: no perder sucursales/meses históricos al subir solo el mes nuevo — 2026-08-31
+El resguardo agregado antes (preservar `fromSheets:true` en `valMatrix`/`acumFromSheets` al
+subir un Excel, ver sección "Subir solo el Excel del mes nuevo") **dependía de que el usuario
+usara "Cargar desde Sheets" A MANO justo antes de subir el Excel** — si no lo hacía (el flujo
+normal: solo se sube el Excel), `valMatrix` arrancaba vacío en `processData()` y CUALQUIER
+sucursal que no viniera en ese Excel nuevo (no solo los meses) desaparecía de `sucursales`,
+perdiéndose de la UI y de la siguiente sincronización (la fila "% Real" de esa sucursal deja de
+reenviarse).
+
+Se corrige automatizando ese paso: se agrega `precargarDesdeSheetsSilencioso_()` (mismo fetch
+que `loadFromSheets()`, pero sin tocar el dot/mensaje de sync ni mostrar toasts, y sin lanzar
+error si el Sheet está vacío o no hay `scriptUrl`) y se llama SIEMPRE antes de `processData()`
+en el listener de `file-input`. Aplica a cualquier empresa, no solo Socovesa — es el mismo
+mecanismo que ya existía, ahora automático en vez de manual.
+
+Verificado en vivo: con "Obra A"/"Obra B" ya sincronizadas (Enero, `fromSheets:true`) y un Excel
+nuevo que solo trae Marzo de "Obra A", tras `processData()` "Obra B" sigue en `sucursales` y su
+Enero queda intacto (`{2026-01:{val:70,fromSheets:true}}`); "Obra A" queda con Enero preservado
++ Marzo recalculado desde cero.
+
+## Socovesa: bugs de clave de borrado por año en Trazabilidad_Docs y Objetivos — 2026-08-31
+Mismo patrón de bug ya encontrado y corregido en `Code-Gespania.gs` (ver sección de más
+arriba), encontrado ahora en `Code-Socovesa.gs`:
+
+- `writeTrazabilidad`: la clave de borrado era `empresa_id+mes` (2 columnas), sin el Año que sí
+  tiene la hoja (columna D) — sincronizar CUALQUIER mes borraba las filas de ESE MISMO mes de
+  TODOS los años anteriores. Se corrigió a `empresa_id+mes+año` (lee 4 columnas).
+- `writeObjetivos`: ya tenía un fix previo (FIX 5, 2026-08-28) que cambió la clave de
+  `empresa_id+mes+año` a `empresa_id+mes+Objetivo` para no borrar TODOS los objetivos de un
+  mes al resincronizar uno solo — pero esa clave dejó de incluir el Año, reintroduciendo el
+  mismo problema para el caso "mismo objetivo, mismo mes, distinto año". Se corrigió a
+  `empresa_id+mes+año+Objetivo` (los 4 juntos, lee 5 columnas) para no repetir ninguno de los
+  dos bugs.
+
+`writeValorizacion` en Socovesa ya estaba bien (clave `empresa_id+Tipo+año`, sin bug).
+
+**Nota pendiente, no corregida**: `Code-Euro.gs`'s `writeObjetivos` tiene el mismo problema que
+tenía Socovesa antes de este fix (clave `empresa_id+mes+Objetivo`, sin Año) — no se tocó porque
+no fue pedido, pero conviene aplicar el mismo fix si se confirma el problema ahí también.
+
+**Importante**: estos cambios son solo en `Code-Socovesa.gs`. Para que tomen efecto en la URL
+en vivo hay que volver a pegar el archivo completo en el editor de Apps Script de Socovesa y
+crear una nueva versión de despliegue.
+
 ## Cómo verificar sintaxis JS del archivo
 El HTML es un solo archivo con `<script>...</script>` embebido. Para validar sintaxis:
 ```bash
