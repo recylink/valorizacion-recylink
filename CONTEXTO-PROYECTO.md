@@ -1724,6 +1724,56 @@ las 9 sucursales de siempre; al cambiar a 2024, tanto el dropdown como la vista 
 quedan con una sola sucursal ("Proyecto Departamental", la única con datos ese año); al volver
 a 2026, las 9 reaparecen.
 
+## Code-Gespania.gs: misma lógica de años/FGR/Minutas que Socovesa (2026-08-28)
+A pedido del usuario ("quiero que gespania funcione con la misma lógica de años que socovesa").
+Gespania tiene, además de `EMPRESAS.gespania.scriptUrl` (usado por `valorizacion-recylink.html`,
+sin cambios), un **"visor de Trazabilidad" propio** — un dashboard separado (fuera de este repo)
+que consume la misma Apps Script vía `?visor=1`/`?callback=X`, igual patrón que Socovesa. El
+usuario pegó el Code.gs real que tenía desplegado para ese visor (sin Minutas, sin lectura real
+de Objetivos, sin selector de año — la versión "de antes" de lo que Socovesa ya tenía).
+
+Se reescribió `Code-Gespania.gs` completo, portando desde `Code-Socovesa.gs` lo que faltaba:
+- **Objetivos reales**: `construirEmpresas_()` ahora arma la lista desde "Objetivos 2026" (lista
+  maestra) + `🎯 Objetivos` (avance real por obra), en vez de 2 objetivos hardcodeados.
+- **Selector de año**: `buildPayload_(anioParam)` lee `?anio=` y filtra Trazabilidad/
+  Valorización/Objetivos-mensuales a ese año; el sidebar (`EMPRESAS`) solo lista obras con datos
+  en ese año; las filas "Anual" de Objetivos nunca se filtran.
+- **TODAS_OBRAS_FGR**: tabla comparativa de FGR (Total M3 acumulado + primer/último registro,
+  leído de "Total Residuos") que muestra TODAS las obras sin importar el año elegido — tiene
+  sentido para Gespania porque también tiene un objetivo FGR ("Lograr un FGR de 0,2 m3/m2").
+- **Visor de Minutas** (`?minutas=1`): mismo motor genérico (`writeMinutas_`/`doGetMinutas_`,
+  ubica cada sesión por fila real, colMap lo arma el cliente). Gespania NO tenía esto desplegado.
+
+**Cuidado al fusionar**: el Code.gs real que pegó el usuario traía versiones MÁS VIEJAS de
+`writeValorizacion`/`writeObjetivos` (borraban por solo `empresa_id`, sin mirar Tipo/Objetivo —
+el mismo bug corregido el 2026-08-14/2026-08-27 en las demás empresas). Se mantuvieron las
+versiones ya corregidas que traía el `Code-Gespania.gs` del repo, NO las del Code.gs pegado —
+usar esas últimas hubiera sido una regresión real (mismo cuidado que ya se tuvo con Acciona).
+
+**Diferencias reales confirmadas contra el Sheet de Gespania** (revisado visualmente, pestaña
+por pestaña, ya que Gespania NO es idéntica a Socovesa):
+- `🎯 Objetivos`, `♻️ Valorización` y `📊 Trazabilidad_Docs` de Gespania **NO tienen columna
+  Año** (a diferencia de Socovesa). Todo el mecanismo de año quedó portado igual, pero
+  `listarAniosDisponibles_()` va a devolver un único año (el actual) hasta que — si corresponde
+  — se agregue esa columna con datos de más de un año real. No rompe nada, simplemente el
+  selector de año queda con una sola opción por ahora.
+- `Total Residuos` de Gespania tiene 7 columnas (Sucursal|Mes|Residuo|Valorizado/No
+  Valorizado|Respel no respel|Total KG|Total M3), sin Año ni "Tons. CO2eq. evitadas" — se ajustó
+  `numCols=7` en `writeTotalResiduos` (el Code.gs pegado por el usuario también traía 7; el
+  `Code-Gespania.gs` viejo del repo tenía `numCols=8`, no coincidía con el Sheet real).
+- `Minuta` de Gespania tiene sub-encabezado de solo 3 columnas ("Tema, Check List, Detalle"), no
+  5 como Socovesa ("Tema, Revisado, Detalle, Acuerdos, Resuelto"). `writeMinutas_` no depende del
+  orden/cantidad de columnas (lo recibe del cliente vía `colMap`), pero se le agregó una guarda
+  (`if (colMap.acuerdos !== undefined...)`) para no romper si el cliente manda un colMap sin esas
+  2 claves — la versión de Socovesa asumía que siempre venían las 5.
+
+**Pendiente / no verificable desde acá**: este cambio es un archivo de Apps Script — no toma
+efecto hasta que el usuario lo pegue en el editor de Apps Script del proyecto de Gespania y cree
+una nueva versión de la implementación (`Implementar > Gestionar implementaciones`). No se pudo
+probar en vivo contra el Sheet real (a diferencia de los cambios en `valorizacion-recylink.html`,
+que se sirven directos); se recomienda correr `testBuildPayload()` y `testReadMinutas()` desde el
+editor después de pegarlo, para confirmar que no hay un nombre de columna que no calce.
+
 ## Cómo verificar sintaxis JS del archivo
 El HTML es un solo archivo con `<script>...</script>` embebido. Para validar sintaxis:
 ```bash
