@@ -109,20 +109,25 @@ function doPost(e) {
   }
 }
 
+// FIX (2026-08-31): la hoja tiene columna Año (índice 3), pero el borrado
+// comparaba solo por empresa_id+Tipo — sincronizar "% Real" de un año
+// borraba de paso "% Real"/"% Acumulado"/"Meta %" de TODOS los años
+// anteriores con el mismo Tipo (mismo bug ya encontrado y corregido en
+// Code-Gespania.gs y Code-Socovesa.gs). Se agrega el Año a la clave.
 function writeValorizacion(ss, data) {
   const sheet = ss.getSheetByName('♻️ Valorización') || ss.getSheetByName('Valorización');
   if (!sheet) throw new Error('Hoja Valorización no encontrada');
   const startRow = 6;
   const lastRow = sheet.getLastRow();
   if (lastRow >= startRow) {
-    // Borrar por empresa_id+Tipo (no solo empresa_id): si el cliente no manda
+    // Borrar por empresa_id+Tipo+Año (no solo empresa_id): si el cliente no manda
     // la fila "Meta %" (porque todavía no conoce el valor real), esta no debe
     // borrarse — antes se borraban las 3 filas (% Real/% Acumulado/Meta %) por
     // cualquier coincidencia de empresa_id, perdiendo la meta ya guardada.
-    const cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 3).getValues();
-    const keys = new Set(data.filas.map(f => f[0] + '|' + f[2]));
+    const cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 4).getValues();
+    const keys = new Set(data.filas.map(f => f[0] + '|' + f[2] + '|' + f[3]));
     const toDelete = [];
-    cols.forEach((r, i) => { if (keys.has(r[0] + '|' + r[2])) toDelete.push(startRow + i); });
+    cols.forEach((r, i) => { if (keys.has(r[0] + '|' + r[2] + '|' + r[3])) toDelete.push(startRow + i); });
     toDelete.reverse().forEach(r => sheet.deleteRow(r));
   }
   const insertRow = sheet.getLastRow() + 1;
@@ -131,6 +136,12 @@ function writeValorizacion(ss, data) {
   });
 }
 
+// FIX (2026-08-31): syncMetas() manda una fila "Meta %" POR AÑO para esta
+// empresa (ver EMPRESAS_VAL_CON_ANIO en el cliente), pero esto matcheaba
+// solo por empresa_id+Tipo (sin Año) — al procesar la 2da fila (ej. 2026)
+// se sobreescribia la fila de OTRO año (ej. 2025) que ya habia matcheado
+// con la 1ra fila, perdiendo esa meta. Se agrega el Año a la comparacion
+// (mismo bug ya encontrado y corregido en Code-Gespania.gs).
 function writeMetas(ss, data) {
   const sheet = ss.getSheetByName('♻️ Valorización') || ss.getSheetByName('Valorización');
   if (!sheet) throw new Error('Hoja Valorización no encontrada');
@@ -140,9 +151,10 @@ function writeMetas(ss, data) {
   const rows = sheet.getRange(startRow, 1, lastRow - startRow + 1, sheet.getLastColumn()).getValues();
   data.filas.forEach(function(fila) {
     const id = fila[0];
+    const anio = fila[3];
     let found = false;
     rows.forEach(function(row, i) {
-      if (row[0] === id && row[2] === 'Meta %') {
+      if (row[0] === id && row[2] === 'Meta %' && String(row[3]) === String(anio)) {
         sheet.getRange(startRow + i, 1, 1, fila.length).setValues([fila]);
         found = true;
       }
@@ -153,16 +165,21 @@ function writeMetas(ss, data) {
   });
 }
 
+// FIX (2026-08-31): la hoja tiene columna Año en D (Sucursal, Mes, Año,
+// Residuo, ...) pero el borrado comparaba solo por empresa_id+Mes —
+// sincronizar cualquier mes borraba de paso las filas de ESE MISMO mes de
+// TODOS los años anteriores (mismo bug ya encontrado y corregido en
+// Code-Gespania.gs y Code-Socovesa.gs). Se agrega el Año a la clave.
 function writeTrazabilidad(ss, data) {
   const sheet = ss.getSheetByName('📊 Trazabilidad_Docs') || ss.getSheetByName('Trazabilidad_Docs');
   if (!sheet) throw new Error('Hoja Trazabilidad_Docs no encontrada');
   const startRow = 6;
   const lastRow = sheet.getLastRow();
   if (lastRow >= startRow) {
-    const cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 3).getValues();
-    const keys = new Set(data.filas.map(f => f[0] + '|' + f[2]));
+    const cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 4).getValues();
+    const keys = new Set(data.filas.map(f => f[0] + '|' + f[2] + '|' + f[3]));
     const toDelete = [];
-    cols.forEach((r, i) => { if (keys.has(r[0] + '|' + r[2])) toDelete.push(startRow + i); });
+    cols.forEach((r, i) => { if (keys.has(r[0] + '|' + r[2] + '|' + r[3])) toDelete.push(startRow + i); });
     toDelete.reverse().forEach(r => sheet.deleteRow(r));
   }
   const insertRow = sheet.getLastRow() + 1;
@@ -183,6 +200,13 @@ function writeTrazabilidad(ss, data) {
 // empresa_id+mes+Objetivo exacto. OJO: en Euro la columna D es "Año"
 // (agregada aparte), asi que el texto del Objetivo queda en la columna E
 // (indice 4), no en la 3 como en las demas empresas.
+//
+// FIX 2 (2026-08-31): esa clave (empresa_id+mes+Objetivo) dejo de incluir
+// el Año — mismo texto de objetivo en el mismo mes pero de OTRO año se
+// borraba igual al resincronizar (mismo bug ya encontrado y corregido en
+// Code-Gespania.gs / Code-Socovesa.gs). Se agrega el Año de vuelta a la
+// clave, ahora junto con el Objetivo (empresa_id+mes+año+Objetivo), para
+// no repetir el bug original del FIX de 2026-08-14 (año solo, sin Objetivo).
 function writeObjetivos(ss, data) {
   const sheet = ss.getSheetByName('🎯 Objetivos') || ss.getSheetByName('Objetivos');
   if (!sheet) throw new Error('Hoja Objetivos no encontrada');
@@ -190,9 +214,9 @@ function writeObjetivos(ss, data) {
   const lastRow = sheet.getLastRow();
   if (lastRow >= startRow) {
     const cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 5).getValues();
-    const keys = new Set(data.filas.map(f => f[0] + '|' + f[2] + '|' + f[4]));
+    const keys = new Set(data.filas.map(f => f[0] + '|' + f[2] + '|' + f[3] + '|' + f[4]));
     const toDelete = [];
-    cols.forEach((r, i) => { if (keys.has(r[0] + '|' + r[2] + '|' + r[4])) toDelete.push(startRow + i); });
+    cols.forEach((r, i) => { if (keys.has(r[0] + '|' + r[2] + '|' + r[3] + '|' + r[4])) toDelete.push(startRow + i); });
     toDelete.reverse().forEach(r => sheet.deleteRow(r));
   }
   const insertRow = sheet.getLastRow() + 1;

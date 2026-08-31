@@ -2097,6 +2097,37 @@ no fue pedido, pero conviene aplicar el mismo fix si se confirma el problema ah�
 en vivo hay que volver a pegar el archivo completo en el editor de Apps Script de Socovesa y
 crear una nueva versión de despliegue.
 
+## Euro: mismos bugs de clave sin Año, corregidos en las 4 funciones que los tenían — 2026-08-31
+A pedido del usuario ("apliques estos mismos cambios para Euro"), se revisó `Code-Euro.gs`
+completo buscando el mismo patrón de bug ya corregido en Gespania y Socovesa (clave de
+borrado/match que no incluye el Año, pese a que la hoja sí lo tiene). Se encontraron y
+corrigieron 4 casos (más que en Socovesa — Euro no tenía ninguno de los 4 bien):
+
+- `writeValorizacion`: clave era `empresa_id+Tipo` (2 campos) → ahora `empresa_id+Tipo+Año`
+  (lee 4 columnas). Sincronizar "% Real" de un año borraba de paso "% Real"/"% Acumulado"/
+  "Meta %" de TODOS los años anteriores con el mismo Tipo.
+- `writeMetas`: matcheaba solo por `empresa_id+Tipo==='Meta %'`, sin Año — como `syncMetas()`
+  manda una fila de Meta % POR AÑO para esta empresa, al procesar la 2da fila (ej. 2026) se
+  sobreescribía la fila que ya había matcheado con la 1ra (ej. 2025), perdiendo esa meta. Se
+  agregó comparación por Año también.
+- `writeTrazabilidad`: clave era `empresa_id+Mes` → ahora `empresa_id+Mes+Año` (lee 4
+  columnas). Mismo problema que Gespania/Socovesa: sincronizar un mes borraba ese mismo mes de
+  todos los años anteriores.
+- `writeObjetivos`: ya tenía un fix previo (2026-08-14) que cambió la clave de
+  `empresa_id+mes+Año` a `empresa_id+mes+Objetivo` (para no borrar TODOS los objetivos de un
+  mes al resincronizar uno), pero esa clave dejó de incluir el Año — mismo objetivo, mismo mes,
+  distinto año, se borraba igual. Se corrigió a `empresa_id+mes+año+Objetivo` (los 4 juntos).
+
+`writeTotalResiduos` en Euro ya estaba bien (arreglado el 2026-08-26, antes de esta sesión —
+borrado selectivo por Sucursal+Año+Mes) y `readTotalResiduosSheet_()`/`doGet` ya exponían Total
+Residuos de vuelta, así que Euro ya se beneficia del cálculo de % Acumulado ponderado por kg/m3
+real (`getAcumReal_`, ver sección de Socovesa más arriba) sin cambios adicionales — Euro usa m3
+en vez de kg como métrica (`esEuro || esAcciona` en `kgRealPorMesSuc_`).
+
+**Importante**: estos cambios son solo en `Code-Euro.gs`. Para que tomen efecto en la URL en
+vivo hay que volver a pegarlo en el editor de Apps Script de Euro y crear una nueva versión de
+despliegue.
+
 ## Cómo verificar sintaxis JS del archivo
 El HTML es un solo archivo con `<script>...</script>` embebido. Para validar sintaxis:
 ```bash
