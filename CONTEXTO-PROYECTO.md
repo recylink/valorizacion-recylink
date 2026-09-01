@@ -2266,6 +2266,30 @@ exactamente `["100% Trazabilidad", "cumplir declaración SINADER", "KPI Costo in
 **Importante**: hay que volver a pegar `Code-Salfa.gs` en el editor de Apps Script de Salfa y
 crear una nueva versión de despliegue para que tome efecto.
 
+## Visor-de-Objetivos-SALFA: quedaba un objetivo de Valorización que no corresponde — 2026-09-01
+Después de corregir el backend (sección anterior), el usuario reportó ver igual un objetivo
+"0% de valorización". La causa NO estaba en `Code-Salfa.gs` (que ya no manda Valorización en
+`emp.objetivos`, verificado con curl directo al endpoint en vivo) sino en el propio
+**frontend** `Visor-de-Objetivos-SALFA/index.html` (repo aparte): al copiarlo de
+`Seguimiento-Abastible`, ese template trae **hardcodeada** una tarjeta de "X% Valorización" en
+3 lugares — `renderObjetivos()` (pestaña 🎯 Objetivos), `contarObjetivosCumplidos_()` (badge
+"X/4" de esa pestaña) e `imprimirInformeCompleto()` (tabla de objetivos del PDF exportado) —
+independiente de lo que mande el backend, porque Abastible sí tiene Valorización como objetivo
+real y Salfa no. De paso, por el mismo motivo, "Asegurar una correcta segregación de residuos"
+(que SÍ es uno de los 4 objetivos reales de Salfa) nunca se mostraba, porque no había ningún
+render genérico para objetivos fuera de los 3 hardcodeados (trazabilidad/SINADER/KPI costo).
+
+Corregido en los 3 lugares (ver commit en `Visor-de-Objetivos-SALFA`): se quita la tarjeta de
+Valorización y se agrega un render genérico que recorre el resto de `emp.objetivos` (excluyendo
+trazabilidad/SINADER/KPI costo/valorización, que ya se muestran aparte) — esto hace que
+"segregación" aparezca automáticamente, y que cualquier objetivo nuevo que se agregue a Salfa
+en el futuro también se muestre sin tocar código. Verificado en local contra el backend real:
+badge "0/4" correcto, tarjeta de segregación visible, PDF sin mención de Valorización.
+
+**Nota**: este mismo problema (tarjetas hardcodeadas para el set de objetivos de Abastible) es
+probablemente compartido por CUALQUIER otro visor clonado de `Seguimiento-Abastible` cuya
+empresa no tenga Valorización entre sus objetivos reales.
+
 ## Cómo verificar sintaxis JS del archivo
 El HTML es un solo archivo con `<script>...</script>` embebido. Para validar sintaxis:
 ```bash
