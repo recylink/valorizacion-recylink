@@ -2203,6 +2203,42 @@ esas 3 empresas sube el Excel de un solo mes.
 **Importante**: hay que volver a pegar `Code-Salfa.gs` en el editor de Apps Script de Salfa y
 crear una nueva versión de despliegue para que el fix tome efecto.
 
+## Salfa: columna Año en Total Residuos y Costo e Ingreso (evitar colisión entre años) — 2026-09-01
+El usuario hizo notar que el fix anterior (borrado selectivo por Sucursal+Mes) no alcanza si
+Salfa tiene datos de más de un año: "Obra A | Enero" de 2025 y "Obra A | Enero" de 2026 son
+indistinguibles sin año, y sincronizar uno borraría/reemplazaría el otro. Confirmado: Salfa sí
+tiene (o tendrá) datos de varios años.
+
+Se agregó la columna **Año** (columna B, entre Sucursal y Mes, mismo lugar que en
+Euro/Gespania/Socovesa) en las hojas **"Total Residuos"** y **"Costo e Ingreso"** — el usuario
+la agregó manualmente en el Sheet (incluyendo backfill del año en las filas históricas
+existentes) antes de tocar el código.
+
+Cambios de código, una vez agregada la columna:
+- **Cliente** (`valorizacion-recylink.html`): `generaAnioTR` ahora incluye `'salfa'` (ya
+  generaba CO2, faltaba el Año). Nuevo flag `generaAnioCI = empresaActual === 'salfa'` para
+  Costo e Ingreso (hoja que hasta ahora no tenía ningún concepto de Año en ninguna empresa) —
+  agrega el año en la misma posición (columna B) que Total Residuos.
+- **`Code-Salfa.gs`**: `writeTotalResiduos` y `writeCostoIngreso` ahora leen 3 columnas
+  (Sucursal|Año|Mes) y comparan por los 3 juntos, mismo patrón que Euro/Gespania. También se
+  corrigió `leerCostoIngreso_()` (usada por el visor standalone `buildPayload_`), que leía por
+  índice fijo y había quedado desalineada (leyendo "Año" donde antes leía "Mes") — ahora lee 8
+  columnas en vez de 7 y salta el Año. **Nota**: esa función sigue agrupando solo por nombre de
+  mes sin distinguir año (misma limitación que ya tiene todo el visor standalone —
+  leerTrazabilidad_/leerValorizacion_/MESES_ACTIVOS tampoco distinguen año); si en el futuro se
+  necesita que ese visor separado muestre varios años, hay que revisar esas funciones también.
+
+Verificado con harness de Node (mock de `SpreadsheetApp` en memoria, sin tocar Sheets reales):
+sincronizar "Obra A | 2026 | Marzo" con filas preexistentes de "Obra A | 2025 | Marzo" y
+"Obra A | 2026 | Enero" preserva ambas intactas y solo agrega la fila nueva — sin colisión
+entre años. También se confirmó en el cliente que `autoSync()` arma las filas con Año en la
+posición correcta: `["Obra A","2026","Marzo","Escombro","Valorizado","No respel",500,10,2]`
+(Total Residuos) y `["Obra A","2026","Marzo","Escombro",500,1000,1500,500]` (Costo e Ingreso).
+
+**Importante**: esto reemplaza el fix anterior (Sucursal+Mes) — hay que volver a pegar el
+`Code-Salfa.gs` actualizado en el editor de Apps Script y crear una nueva versión de
+despliegue.
+
 ## Cómo verificar sintaxis JS del archivo
 El HTML es un solo archivo con `<script>...</script>` embebido. Para validar sintaxis:
 ```bash

@@ -1549,15 +1549,16 @@ function autoSync(rows) {
   });
 
   // Total Residuos (Copec, Abastible, Gespania, Salfa, Euro, Ando y Socovesa): Sucursal | Mes | Residuo | Valorizado/No Valorizado | Respel no respel | Total KG | Total M3 [| Tons. CO2eq. evitadas]
-  // Año (col. B) y Tons. CO2eq. evitadas son exclusivos de Euro/Socovesa/Gespania (Año) y del
-  // grupo original (Copec/Abastible/Gespania/Salfa/Euro/Socovesa) respectivamente — Ando no usa
-  // ninguna de las 2. Socovesa agrego esta hoja despues, con el mismo formato que Euro (ver
+  // Año (col. B) y Tons. CO2eq. evitadas son exclusivos de Euro/Socovesa/Gespania/Salfa (Año) y
+  // del grupo original (Copec/Abastible/Gespania/Salfa/Euro/Socovesa) respectivamente — Ando no
+  // usa ninguna de las 2. Socovesa agrego esta hoja despues, con el mismo formato que Euro (ver
   // Code-Socovesa.gs); Gespania agrego la columna Año el 2026-08-31 (a pedido del usuario, para
-  // que la pestaña FGR del visor separado pueda calcular primer/ultimo registro) — mismo lugar
-  // que Euro/Socovesa: columna B, entre Sucursal y Mes.
+  // que la pestaña FGR del visor separado pueda calcular primer/ultimo registro); Salfa agrego
+  // la misma columna el 2026-09-01 (para no perder historico entre años en un mismo Excel de un
+  // solo mes) — mismo lugar que Euro/Socovesa/Gespania: columna B, entre Sucursal y Mes.
   var filasTotalResiduos = [];
   if (empresaActual === 'copec' || empresaActual === 'abastible' || empresaActual === 'gespania' || empresaActual === 'salfa' || empresaActual === 'euro' || empresaActual === 'ando' || empresaActual === 'pms' || empresaActual === 'ccu' || empresaActual === 'acciona' || empresaActual === 'socovesa') {
-    var generaAnioTR = empresaActual === 'euro' || empresaActual === 'socovesa' || empresaActual === 'gespania';
+    var generaAnioTR = empresaActual === 'euro' || empresaActual === 'socovesa' || empresaActual === 'gespania' || empresaActual === 'salfa';
     var generaCO2TR = empresaActual === 'copec' || empresaActual === 'abastible' || empresaActual === 'gespania' || empresaActual === 'salfa' || empresaActual === 'euro' || empresaActual === 'socovesa';
     filasTotalResiduos = totalResiduosRows.map(function(r){
       var row = [r.suc];
@@ -1579,16 +1580,22 @@ function autoSync(rows) {
   // empresa con el objetivo 'kpi_costo'): Sucursal | Mes | Residuo | Total KG |
   // Costo Total | Ingreso Total | Neto (Ingreso - Costo). costoIngresoRows ya
   // viene vacio para el resto de empresas (ver processData()).
+  // Salfa agrego columna Año (col. B, mismo lugar que en Total Residuos) el
+  // 2026-09-01, mismo motivo: no perder historico entre años al subir el
+  // Excel de un solo mes.
+  var generaAnioCI = empresaActual === 'salfa';
   var filasCostoIngreso = costoIngresoRows.map(function(r){
-    return [
-      r.suc,
+    var row = [r.suc];
+    if (generaAnioCI) row.push(r.mes.slice(0,4));
+    row.push(
       MESES_ES[parseInt(r.mes.slice(5))],
       r.residuo,
       parseFloat(r.kg.toFixed(2)),
       parseFloat(r.costo.toFixed(2)),
       parseFloat(r.ingreso.toFixed(2)),
       parseFloat((r.ingreso - r.costo).toFixed(2))
-    ];
+    );
+    return row;
   });
 
   // Preparar payload trazabilidad

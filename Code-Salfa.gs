@@ -169,10 +169,13 @@ function buscarFilaEncabezado_(sheet, valorEsperado) {
 // subido (no las de meses anteriores), un Excel de un solo mes borraba el
 // histórico completo de Total Residuos (mismo bug ya encontrado y corregido
 // en Code-Gespania.gs y Code-Euro.gs). Ahora reemplaza SOLO las filas cuya
-// Sucursal+Mes coincide con lo que trae el Excel — el resto de
-// sucursales/meses no tocados por esta carga queda intacto. Salfa no tiene
-// columna Año en esta hoja, así que la clave es Sucursal+Mes (no
-// Sucursal+Año+Mes como en Euro/Gespania).
+// Sucursal+Año+Mes coincide con lo que trae el Excel — el resto de
+// sucursales/años/meses no tocados por esta carga queda intacto.
+//
+// FIX 2 (2026-09-01): se agregó la columna Año (col. B, entre Sucursal y
+// Mes) para que este borrado selectivo no confunda, por ejemplo, "Obra A |
+// Enero" de 2025 con "Obra A | Enero" de 2026 (mismo mes, distinto año) —
+// mismo criterio que Euro/Gespania/Socovesa.
 function writeTotalResiduos(ss, data) {
   var sheet = ss.getSheetByName('Total Residuos');
   if (!sheet) throw new Error('Hoja "Total Residuos" no encontrada');
@@ -182,12 +185,12 @@ function writeTotalResiduos(ss, data) {
   var lastRow = sheet.getLastRow();
 
   if (data.filas && data.filas.length > 0) {
-    var keys = new Set(data.filas.map(function (f) { return String(f[0]) + '|' + String(f[1]); }));
+    var keys = new Set(data.filas.map(function (f) { return String(f[0]) + '|' + String(f[1]) + '|' + String(f[2]); }));
     if (lastRow >= startRow) {
-      var cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 2).getValues();
+      var cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 3).getValues();
       var toDelete = [];
       cols.forEach(function (r, i) {
-        var key = String(r[0]) + '|' + String(r[1]);
+        var key = String(r[0]) + '|' + String(r[1]) + '|' + String(r[2]);
         if (keys.has(key)) toDelete.push(startRow + i);
       });
       toDelete.reverse().forEach(function (r) { sheet.deleteRow(r); });
@@ -217,14 +220,18 @@ function readRespelSheet_() {
 
 // ── Costo e Ingreso por residuo ──
 // Esta función faltaba en el script original (doPost ya la llamaba pero no
-// existía). Headers: Sucursal | Mes | Residuo | Total KG | Costo Total |
+// existía). Headers: Sucursal | Año | Mes | Residuo | Total KG | Costo Total |
 // Ingreso Total | Neto (Ingreso - Costo).
 //
 // FIX (2026-09-01): mismo bug que writeTotalResiduos — reemplazaba TODA la
 // hoja con solo lo que manda el cliente en esta sincronización (el Excel
 // recién subido), borrando el histórico de meses anteriores. Ahora
-// reemplaza solo las filas cuya Sucursal+Mes coincide con lo que trae el
+// reemplaza solo las filas cuya Sucursal+Año+Mes coincide con lo que trae el
 // Excel.
+//
+// FIX 2 (2026-09-01): se agregó la columna Año (col. B, entre Sucursal y
+// Mes, mismo lugar que en Total Residuos) para no confundir el mismo mes de
+// distintos años.
 function writeCostoIngreso(ss, data) {
   var sheet = ss.getSheetByName('Costo e Ingreso');
   if (!sheet) throw new Error('Hoja "Costo e Ingreso" no encontrada');
@@ -234,12 +241,12 @@ function writeCostoIngreso(ss, data) {
   var lastRow = sheet.getLastRow();
 
   if (data.filas && data.filas.length > 0) {
-    var keys = new Set(data.filas.map(function (f) { return String(f[0]) + '|' + String(f[1]); }));
+    var keys = new Set(data.filas.map(function (f) { return String(f[0]) + '|' + String(f[1]) + '|' + String(f[2]); }));
     if (lastRow >= startRow) {
-      var cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 2).getValues();
+      var cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 3).getValues();
       var toDelete = [];
       cols.forEach(function (r, i) {
-        var key = String(r[0]) + '|' + String(r[1]);
+        var key = String(r[0]) + '|' + String(r[1]) + '|' + String(r[2]);
         if (keys.has(key)) toDelete.push(startRow + i);
       });
       toDelete.reverse().forEach(function (r) { sheet.deleteRow(r); });
@@ -252,6 +259,13 @@ function writeCostoIngreso(ss, data) {
 // Lee "Costo e Ingreso" agrupado por sucursal (empresa_id) → mes → residuos[],
 // con totales agregados por mes. Usada solo por el visor standalone
 // (buildPayload_); writeCostoIngreso / la pestaña en sí no cambian en nada.
+//
+// NOTA (2026-09-01): la hoja ahora tiene columna Año (col. B), pero esta
+// función sigue agrupando solo por nombre de mes (sin año) — igual
+// limitación que ya tiene el resto del visor standalone (leerTrazabilidad_/
+// leerValorizacion_/MESES_ACTIVOS tampoco distinguen año). Si en el futuro
+// se necesita que el visor standalone muestre varios años, hay que revisar
+// esas funciones también, no solo esta.
 function leerCostoIngreso_() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName('Costo e Ingreso');
@@ -261,19 +275,20 @@ function leerCostoIngreso_() {
   var startRow = headerRow + 1;
   var lastRow = sheet.getLastRow();
   if (lastRow < startRow) return {};
-  var rows = sheet.getRange(startRow, 1, lastRow - startRow + 1, 7).getValues();
+  var rows = sheet.getRange(startRow, 1, lastRow - startRow + 1, 8).getValues();
 
   var result = {}; // empId -> mes -> { residuos:[...], totales:{...} }
   rows.forEach(function (r) {
     var suc = String(r[0] || '').trim();
-    var mes = normalizarMes_(r[1]);
-    var residuo = String(r[2] || '').trim();
+    // r[1] = Año (no se usa aquí, ver nota arriba)
+    var mes = normalizarMes_(r[2]);
+    var residuo = String(r[3] || '').trim();
     if (!suc || !mes) return;
     var empId = normalizarSucursal_(suc);
-    var totalKg = Number(r[3]) || 0;
-    var costoTotal = Number(r[4]) || 0;
-    var ingresoTotal = Number(r[5]) || 0;
-    var neto = (r[6] !== '' && r[6] !== null && r[6] !== undefined) ? Number(r[6]) : (ingresoTotal - costoTotal);
+    var totalKg = Number(r[4]) || 0;
+    var costoTotal = Number(r[5]) || 0;
+    var ingresoTotal = Number(r[6]) || 0;
+    var neto = (r[7] !== '' && r[7] !== null && r[7] !== undefined) ? Number(r[7]) : (ingresoTotal - costoTotal);
 
     result[empId] = result[empId] || {};
     if (!result[empId][mes]) {
