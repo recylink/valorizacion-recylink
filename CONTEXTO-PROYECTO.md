@@ -2128,6 +2128,54 @@ en vez de kg como métrica (`esEuro || esAcciona` en `kgRealPorMesSuc_`).
 vivo hay que volver a pegarlo en el editor de Apps Script de Euro y crear una nueva versión de
 despliegue.
 
+## Salfa: estandarizar el visor standalone "Visor-de-Objetivos-SALFA" — 2026-09-01
+El usuario pidió estandarizar `https://github.com/recylink/Visor-de-Objetivos-SALFA` (repo
+aparte, GitHub Pages) usando una versión fusionada de `Code.gs` que pegó directamente en el
+chat (agrega el visor standalone + Minutas al `Code-Salfa.gs` existente, sin tocar
+doPost/doGet clásico/Total Residuos/RESPEL). Pidió explícitamente que quedara parecido al
+"visor de Abastible".
+
+**Hallazgo clave**: `Visor-de-Objetivos-SALFA/index.html` (clonado para inspeccionar) resultó
+ser BYTE-IDÉNTICO a `Visor-de-Objetivos-Abastible/index.html` salvo `EMPRESA_NOMBRE` y
+`DATA_SOURCE_URL` — es decir, ya es "el mismo visor que Abastible", nada que tocar ahí. Ese
+frontend pide los datos con `<script src="...exec?callback=X">` (JSONP) **sin ningún otro
+parámetro** — ni `?visor=1` ni nada — y espera de vuelta `callback({EMPRESAS, VAL_DATA,
+MESES_ACTIVOS})`. Confirmado comparando con `Code-Abastible.gs` (`buildLegacyPayload_` +
+`doGet`, que activa ese payload con solo detectar `callback` en la URL, sin `visor=1`).
+
+El script fusionado que pegó el usuario, en cambio, solo activaba su payload del visor
+(`doGetVisor_`/`buildPayload_`) con `?visor=1` explícito — con un `callback` suelto (que es
+justo lo que manda el visor real de Salfa) caía al `doGetClasico_`, que no devuelve JSONP y
+rompería el visor (el navegador intentaría ejecutar JSON plano como script).
+
+**Fix aplicado en `Code-Salfa.gs`** (reemplaza por completo el archivo): se mantiene toda la
+lógica del script pegado (doPost, writeCostoIngreso, Minutas, `buildPayload_`/
+`construirEmpresas_` — más rico que el de Abastible: lee CSE, Costo-Ingreso y una hoja
+"🎯 Objetivos" real, no solo Valorización/Trazabilidad), pero se corrige el dispatcher final:
+
+```js
+function doGet(e) {
+  const params = (e && e.parameter) || {};
+  if (params.minutas === '1') return doGetMinutas_(e);
+  // callback SIN visor=1 (mecanismo real del visor, igual que Abastible) TAMBIÉN activa el payload
+  if (params.visor === '1' || params.callback) return doGetVisor_(e);
+  return doGetClasico_(e);
+}
+```
+
+`?visor=1` se deja como alias explícito (no molesta), pero el camino real que usa el visor
+desplegado es el `callback` suelto — igual que Abastible.
+
+Verificado con un harness Node (mocks de `SpreadsheetApp`/`ContentService`, sin tocar Sheets
+reales): `doGet({parameter:{callback:'cb123'}})` devuelve `cb123({EMPRESAS:[...], VAL_DATA:
+{...}, MESES_ACTIVOS:[...]})` con el shape correcto; `doGet({parameter:{}})` (sin parámetros,
+usado por el visor principal) sigue devolviendo el dump clásico sin cambios.
+
+**Importante**: hay que pegar este `Code-Salfa.gs` completo en el editor de Apps Script del
+Sheet de Salfa (`1LtRSJ-ZYPYoFmGHUik03OAVYxzg9REPn5NTIGhostGI`) y crear una nueva versión de
+despliegue para que el visor standalone funcione. No hace falta tocar
+`Visor-de-Objetivos-SALFA/index.html` — ya está bien tal como está.
+
 ## Cómo verificar sintaxis JS del archivo
 El HTML es un solo archivo con `<script>...</script>` embebido. Para validar sintaxis:
 ```bash

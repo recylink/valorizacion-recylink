@@ -1,27 +1,51 @@
 /**
  * ============================================================
- * RECYLINK · Apps Script del Sheet de SALFA
+ * RECYLINK · Apps Script del Sheet de SALFA — VERSIÓN FUSIONADA
  * ============================================================
- * Proyecto de Apps Script nuevo, para vincular al Sheet de Salfa
- * (ID 1LtRSJ-ZYPYoFmGHUik03OAVYxzg9REPn5NTIGhostGI). No existía Apps
- * Script previo para esta empresa.
+ * Este archivo reemplaza por completo el Code.gs anterior. Todo lo que ya
+ * había queda 100% intacto (doPost, doGet clásico, Total Residuos, RESPEL).
  *
- * Mismo esquema que Code-Gespania.gs: writeObjetivos borra solo por
- * empresa_id + mes exacto (no por prefijo de empresa completo), soporte
- * para tipo:'totalResiduos', y doGet expone la hoja RESPEL propia del
- * Sheet (Residuo -> TRUE/FALSE).
+ * LO QUE SE AGREGA:
  *
- * Requiere que el Sheet tenga las pestañas "Total Residuos" (headers:
- * Sucursal | Mes | Residuo | Valorizado/No Valorizado | Respel no
- * respel | Total KG | Total M3) y "RESPEL" (headers: Residuo | RESPEL)
- * ya creadas — verificar antes de desplegar (Salfa ya las trae, solo
- * confirmar que los headers coincidan exactamente).
+ *  1) EL VISOR STANDALONE "Visor-de-Objetivos-SALFA" (repo aparte, GitHub
+ *     Pages) — mismo mecanismo que "Visor-de-Objetivos-Abastible"
+ *     (ver Code-Abastible.gs, buildLegacyPayload_/doGet): ese visor NO usa
+ *     fetch() sino un <script src="...exec?callback=NOMBRE"> (JSONP), SIN
+ *     ningún otro parámetro. Por eso doGet() de más abajo activa el payload
+ *     del visor con solo detectar `callback` en la URL (no hace falta
+ *     `?visor=1` — se deja como alias por si se quiere ser explícito, pero
+ *     el visor real de Salfa llama sin él, igual que Abastible).
+ *     - Sin `callback` ni `minutas=1`: doGet responde EXACTAMENTE igual
+ *       que antes (doGetClasico_, usado por el visor principal
+ *       valorizacion-recylink).
+ *     - Incluye "Costo-Ingreso" leyendo la pestaña "Costo e Ingreso" y
+ *       agregándola a cada sucursal (emp.costoIngreso). También incluye
+ *       writeCostoIngreso, que el doPost original ya llamaba pero no
+ *       existía en el script previo.
+ *
+ *  2) EL VISOR DE MINUTAS (integrado al mismo backend):
+ *     - Se activa SOLO si la request trae ?minutas=1.
+ *     - Lee/escribe la pestaña "Minuta" ubicando cada sesión por su fila
+ *       real (no por texto de título) y detectando el orden de columnas
+ *       leyendo el sub-encabezado ("Tema, Revisado, Detalle, Acuerdos,
+ *       Resuelto" en este caso) — mismo motor que COPEC/PMS/Abastible.
  * ============================================================
  */
 
 function doPost(e) {
   try {
-    const data = JSON.parse(e.postData.contents);
+    // Soporta tanto el POST directo (fetch, JSON en el body) como el método
+    // de respaldo del visor de Minutas (formulario oculto, llega como
+    // e.parameter.payload). Si no viene ninguno de los dos, se comporta
+    // exactamente como antes.
+    var raw;
+    if (e.parameter && e.parameter.payload) {
+      raw = e.parameter.payload;
+    } else {
+      raw = e.postData.contents;
+    }
+
+    const data = JSON.parse(raw);
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const tipo = data.tipo;
 
@@ -31,6 +55,7 @@ function doPost(e) {
     else if (tipo === 'objetivos') writeObjetivos(ss, data);
     else if (tipo === 'totalResiduos') writeTotalResiduos(ss, data);
     else if (tipo === 'costoIngreso') writeCostoIngreso(ss, data);
+    else if (tipo === 'minutas') writeMinutas_(ss, data); // NUEVO — Visor de Minutas
 
     return ContentService
       .createTextOutput(JSON.stringify({ok: true}))
@@ -104,9 +129,10 @@ function writeTrazabilidad(ss, data) {
   });
 }
 
-// Borra solo las filas cuyo empresa_id+mes coincide exactamente con lo que
-// se esta reinsertando (no por prefijo de empresa completo), para no perder
-// historico de objetivos de otras sucursales/meses al sincronizar.
+// FIX: antes borraba por prefijo de empresa completo (data.filas[0][0].split('_')[0]),
+// lo que eliminaba el histórico de objetivos de TODAS las sucursales/meses de Salfa
+// al sincronizar. Ahora borra solo las filas cuyo empresa_id+mes coincide exactamente
+// con lo que se está reinsertando.
 function writeObjetivos(ss, data) {
   const sheet = ss.getSheetByName('🎯 Objetivos') || ss.getSheetByName('Objetivos');
   if (!sheet) throw new Error('Hoja Objetivos no encontrada');
@@ -125,13 +151,8 @@ function writeObjetivos(ss, data) {
   });
 }
 
-// ── Total Residuos + RESPEL ──
+// ── Total Residuos + RESPEL (lo que ya había) ──
 
-// Busca en la columna A la fila cuyo valor sea exactamente "valorEsperado"
-// (ej. "Sucursal" o "Residuo") y devuelve el numero de fila (1-indexed).
-// Evita asumir que el header esta en una fila fija, ya que estas 2 hojas
-// no tienen las filas decorativas de titulo/instrucciones que si tienen
-// las 3 hojas principales.
 function buscarFilaEncabezado_(sheet, valorEsperado) {
   var lastRow = Math.min(sheet.getLastRow(), 20);
   if (lastRow < 1) return null;
@@ -142,10 +163,6 @@ function buscarFilaEncabezado_(sheet, valorEsperado) {
   return null;
 }
 
-// Reemplaza TODAS las filas de datos de "Total Residuos" por las que manda
-// el cliente. El cliente siempre envia el set completo vigente (calculado
-// desde el Excel cargado), asi que no hace falta borrado selectivo por
-// empresa_id como en writeValorizacion (esta hoja no tiene esa columna).
 function writeTotalResiduos(ss, data) {
   var sheet = ss.getSheetByName('Total Residuos');
   if (!sheet) throw new Error('Hoja "Total Residuos" no encontrada');
@@ -162,32 +179,6 @@ function writeTotalResiduos(ss, data) {
   }
 }
 
-// ── NUEVO: Costo e Ingreso por residuo ──
-// Alimenta el seguimiento del KPI "costo e ingreso" (objetivo kpi_costo):
-// una fila por Sucursal+Mes+Residuo con el costo de transporte y el ingreso
-// por venta acumulados. Requiere crear la pestaña "Costo e Ingreso" a mano en
-// el Sheet (headers: Sucursal | Mes | Residuo | Total KG | Costo Total |
-// Ingreso Total | Neto (Ingreso - Costo)), mismo criterio que "Total Residuos"
-// (busca el header en la columna A, no asume fila fija). Mismo patrón de
-// reemplazo total que writeTotalResiduos.
-function writeCostoIngreso(ss, data) {
-  var sheet = ss.getSheetByName('Costo e Ingreso');
-  if (!sheet) throw new Error('Hoja "Costo e Ingreso" no encontrada');
-  var headerRow = buscarFilaEncabezado_(sheet, 'Sucursal');
-  if (!headerRow) throw new Error('No se encontro la fila de encabezado ("Sucursal") en Costo e Ingreso');
-  var startRow = headerRow + 1;
-  var numCols = 7; // Sucursal | Mes | Residuo | Total KG | Costo Total | Ingreso Total | Neto (Ingreso - Costo)
-  var lastRow = sheet.getLastRow();
-  if (lastRow >= startRow) {
-    sheet.getRange(startRow, 1, lastRow - startRow + 1, numCols).clearContent();
-  }
-  if (data.filas && data.filas.length > 0) {
-    sheet.getRange(startRow, 1, data.filas.length, data.filas[0].length).setValues(data.filas);
-  }
-}
-
-// Lee la hoja RESPEL (Residuo -> TRUE/FALSE) como array de objetos, igual
-// formato que las otras hojas.
 function readRespelSheet_() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName('RESPEL');
@@ -206,7 +197,626 @@ function readRespelSheet_() {
   });
 }
 
+// ── Costo e Ingreso por residuo ──
+// Esta función faltaba en el script original (doPost ya la llamaba pero no
+// existía). Mismo patrón que writeTotalResiduos: reemplaza TODAS las filas
+// de datos por las que manda el cliente (headers: Sucursal | Mes | Residuo |
+// Total KG | Costo Total | Ingreso Total | Neto (Ingreso - Costo)).
+function writeCostoIngreso(ss, data) {
+  var sheet = ss.getSheetByName('Costo e Ingreso');
+  if (!sheet) throw new Error('Hoja "Costo e Ingreso" no encontrada');
+  var headerRow = buscarFilaEncabezado_(sheet, 'Sucursal');
+  if (!headerRow) throw new Error('No se encontro la fila de encabezado ("Sucursal") en Costo e Ingreso');
+  var startRow = headerRow + 1;
+  var numCols = 7; // Sucursal | Mes | Residuo | Total KG | Costo Total | Ingreso Total | Neto (Ingreso - Costo)
+  var lastRow = sheet.getLastRow();
+  if (lastRow >= startRow) {
+    sheet.getRange(startRow, 1, lastRow - startRow + 1, numCols).clearContent();
+  }
+  if (data.filas && data.filas.length > 0) {
+    sheet.getRange(startRow, 1, data.filas.length, data.filas[0].length).setValues(data.filas);
+  }
+}
+
+// Lee "Costo e Ingreso" agrupado por sucursal (empresa_id) → mes → residuos[],
+// con totales agregados por mes. Usada solo por el visor standalone
+// (buildPayload_); writeCostoIngreso / la pestaña en sí no cambian en nada.
+function leerCostoIngreso_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Costo e Ingreso');
+  if (!sheet) return {};
+  var headerRow = buscarFilaEncabezado_(sheet, 'Sucursal');
+  if (!headerRow) return {};
+  var startRow = headerRow + 1;
+  var lastRow = sheet.getLastRow();
+  if (lastRow < startRow) return {};
+  var rows = sheet.getRange(startRow, 1, lastRow - startRow + 1, 7).getValues();
+
+  var result = {}; // empId -> mes -> { residuos:[...], totales:{...} }
+  rows.forEach(function (r) {
+    var suc = String(r[0] || '').trim();
+    var mes = normalizarMes_(r[1]);
+    var residuo = String(r[2] || '').trim();
+    if (!suc || !mes) return;
+    var empId = normalizarSucursal_(suc);
+    var totalKg = Number(r[3]) || 0;
+    var costoTotal = Number(r[4]) || 0;
+    var ingresoTotal = Number(r[5]) || 0;
+    var neto = (r[6] !== '' && r[6] !== null && r[6] !== undefined) ? Number(r[6]) : (ingresoTotal - costoTotal);
+
+    result[empId] = result[empId] || {};
+    if (!result[empId][mes]) {
+      result[empId][mes] = { residuos: [], totales: { totalKg: 0, costoTotal: 0, ingresoTotal: 0, neto: 0 } };
+    }
+    result[empId][mes].residuos.push({ residuo: residuo, totalKg: totalKg, costoTotal: costoTotal, ingresoTotal: ingresoTotal, neto: neto });
+    result[empId][mes].totales.totalKg += totalKg;
+    result[empId][mes].totales.costoTotal += costoTotal;
+    result[empId][mes].totales.ingresoTotal += ingresoTotal;
+    result[empId][mes].totales.neto += neto;
+  });
+  return result;
+}
+
+
+
+// ============================================================
+// VISOR DE MINUTAS — lectura/escritura de la pestaña "Minuta"
+// ============================================================
+
+var SHEET_MINUTA_CANDIDATOS = ['Minuta ', 'Minuta', '📝 Minuta'];
+
+function encontrarHojaMinuta_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  for (var i = 0; i < SHEET_MINUTA_CANDIDATOS.length; i++) {
+    var sheet = ss.getSheetByName(SHEET_MINUTA_CANDIDATOS[i]);
+    if (sheet) return sheet;
+  }
+  throw new Error('No se encontró la hoja de Minutas: ' + SHEET_MINUTA_CANDIDATOS.join(' / '));
+}
+
+/**
+ * data.sessions viene del visor con esta forma:
+ * [{ title, headerRow, dataStartRow, colMap:{item,cumplido,comentario,acuerdos,revisado},
+ *    items:[{item, cumplido, comentario, acuerdos, revisado}, ...] }, ...]
+ *
+ * headerRow/dataStartRow/colMap vienen calculados por el visor a partir de la
+ * misma lectura que acaba de mostrar en pantalla — no se busca por texto de
+ * título y colMap dice en qué columna va cada campo (en Salfa el sub-encabezado
+ * es "Tema, Revisado, Detalle, Acuerdos, Resuelto" — el visor lo detecta solo).
+ */
+function writeMinutas_(ss, data) {
+  var sheet = encontrarHojaMinuta_();
+
+  (data.sessions || []).forEach(function (session) {
+    if (!session.headerRow) return; // sesión sin referencia de fila, se omite por seguridad
+    var dataStartRow = session.dataStartRow || (session.headerRow + 1);
+    var colMap = session.colMap || { item:0, cumplido:1, comentario:2, acuerdos:3, revisado:4 };
+
+    var blockEnd = buscarFinBloqueMinuta_(sheet, dataStartRow);
+    var currentSize = blockEnd - dataStartRow;
+    var rows = session.items || [];
+    var neededSize = rows.length;
+
+    if (neededSize > currentSize) {
+      sheet.insertRowsBefore(blockEnd, neededSize - currentSize);
+    }
+
+    for (var i = 0; i < neededSize; i++) {
+      var row = rows[i];
+      var targetRow = dataStartRow + i;
+      sheet.getRange(targetRow, colMap.item + 1).setValue(row.item || '');
+      sheet.getRange(targetRow, colMap.cumplido + 1).setValue(!!row.cumplido);
+      sheet.getRange(targetRow, colMap.comentario + 1).setValue(row.comentario || '');
+      sheet.getRange(targetRow, colMap.acuerdos + 1).setValue(row.acuerdos || '');
+      sheet.getRange(targetRow, colMap.revisado + 1).setValue(!!row.revisado);
+    }
+  });
+}
+
+// El bloque de una sesión termina en la siguiente "fila de título" (columna A
+// con contenido y el resto de columnas A:F vacío) o al llegar al final de la hoja.
+function buscarFinBloqueMinuta_(sheet, fromRow) {
+  var lastRow = sheet.getLastRow();
+  var lastCol = Math.min(Math.max(sheet.getLastColumn(), 5), 6);
+  for (var r = fromRow; r <= lastRow; r++) {
+    var vals = sheet.getRange(r, 1, 1, lastCol).getValues()[0];
+    if (esFilaDeTitulo_(vals)) return r;
+  }
+  return lastRow + 1;
+}
+function esFilaDeTitulo_(vals) {
+  if (vals[0] === '' || vals[0] === null) return false;
+  for (var i = 1; i < vals.length; i++) {
+    if (vals[i] !== '' && vals[i] !== null) return false; // false/0 sí cuentan como "con contenido"
+  }
+  return true;
+}
+
+// Devuelve las filas crudas (A:F) de la pestaña Minuta vía JSONP, para que
+// el visor las parsee con su propia lógica de sesiones.
+function doGetMinutas_(e) {
+  var payload;
+  try {
+    var sheet = encontrarHojaMinuta_();
+    var lastRow = sheet.getLastRow();
+    var lastCol = Math.max(sheet.getLastColumn(), 5);
+    var rows = lastRow > 0 ? sheet.getRange(1, 1, lastRow, lastCol).getValues() : [];
+    payload = { rows: rows };
+  } catch (err) {
+    payload = { error: true, message: String(err) };
+  }
+
+  var callback = e && e.parameter && e.parameter.callback;
+  if (callback) {
+    var js = callback + "(" + JSON.stringify(payload) + ");";
+    return ContentService.createTextOutput(js)
+      .setMimeType(ContentService.MimeType.JAVASCRIPT);
+  }
+  return ContentService.createTextOutput(JSON.stringify(payload))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+
+// ============================================================
+// VISOR STANDALONE "Visor-de-Objetivos-SALFA" (mismo mecanismo que
+// "Visor-de-Objetivos-Abastible": JSONP con ?callback=X, sin parámetros
+// adicionales — ver el doGet() al final de este archivo)
+// ============================================================
+
+var EMPRESA_NOMBRE  = "Salfa";
+var EMPRESA_COLOR   = "#D92D20";    // rojo — cámbialo si tienen otro color de marca
+var EMPRESA_COLOR_L = "#FEF3F2";
+
+var SHEET_TRAZA_CANDIDATOS = ['📊 Trazabilidad_Docs', 'Trazabilidad_Docs'];
+var SHEET_VAL_CANDIDATOS   = ['♻️ Valorización', 'Valorización'];
+var SHEET_CSE_CANDIDATOS   = ['👥 Seguimiento_CSE', 'Seguimiento_CSE'];
+
+var MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio",
+             "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+
+var DOC_COLS = ["Cert. tratamiento","Factura","Cert. declaración","Transportista","Disposición final"];
+
+var COMENTARIO_HEADERS_CANDIDATOS = ["Comentario por sucursal", "Comentarios", "Comentario"];
+
+
+function doGetVisor_(e) {
+  var payload;
+  try {
+    payload = buildPayload_();
+  } catch (err) {
+    payload = { error: true, message: String(err) };
+  }
+
+  var callback = e && e.parameter && e.parameter.callback;
+  if (callback) {
+    var js = callback + "(" + JSON.stringify(payload) + ");";
+    return ContentService.createTextOutput(js)
+      .setMimeType(ContentService.MimeType.JAVASCRIPT);
+  }
+
+  return ContentService.createTextOutput(JSON.stringify(payload))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function buildPayload_() {
+  var traza = leerTrazabilidad_();
+  var val   = leerValorizacion_();
+
+  var empIdsValidos = {};
+  Object.keys(traza.sucursales).forEach(function (empId) { empIdsValidos[empId] = true; });
+
+  var cse   = leerCSE_(empIdsValidos);
+  var costoIngreso = leerCostoIngreso_();
+  var objetivosReales = leerObjetivosReales_();
+  var empresas = construirEmpresas_(traza, val, cse);
+  empresas.forEach(function (e) {
+    e.costoIngreso = costoIngreso[e.id] || {};
+    var propios = objetivosReales[e.id] || {};
+    Object.keys(propios).forEach(function (texto) {
+      e.objetivos.push({ texto: texto, avance: propios[texto].avance, ok: propios[texto].ok, detalle: propios[texto].detalle });
+    });
+  });
+  var mesesActivos = calcularMesesActivos_(traza, val, cse);
+
+  return {
+    generatedAt: new Date().toISOString(),
+    EMPRESA_NOMBRE: EMPRESA_NOMBRE,
+    EMPRESA_COLOR: EMPRESA_COLOR,
+    EMPRESA_COLOR_L: EMPRESA_COLOR_L,
+    MESES_ACTIVOS: mesesActivos,
+    EMPRESAS: empresas,
+    VAL_DATA: val
+  };
+}
+
+// Lee la hoja real "🎯 Objetivos" (empresa_id | Sucursal | Mes | Objetivo |
+// % cumplimiento | Detalle) y devuelve, por sucursal, el objetivo más
+// reciente de cada texto distinto — excluyendo "Trazabilidad" y
+// "Valorización", que ya tienen su propia tarjeta calculada aparte en el
+// visor. La columna "% cumplimiento" puede traer un % ("30,00%"), un Sí/No,
+// o texto libre (ej. "Cert. tratamiento: 2/2 | Factura: 0/2") — se maneja
+// cada caso.
+function leerObjetivosReales_() {
+  var sr;
+  try {
+    sr = getSheetRows_(['🎯 Objetivos', 'Objetivos']);
+  } catch (err) {
+    return {};
+  }
+  var h = sr.header;
+  var idxSuc = h.indexOf("Sucursal");
+  var idxMes = h.indexOf("Mes");
+  var idxObj = h.indexOf("Objetivo");
+  var idxPct = h.indexOf("% cumplimiento");
+  var idxDet = h.indexOf("Detalle");
+
+  var result = {}; // empId -> texto -> { mesIdx, avance, ok, detalle }
+
+  sr.rows.forEach(function (r) {
+    var suc = String(r[idxSuc] || "").trim();
+    var texto = String(r[idxObj] || "").trim();
+    if (!suc || !texto) return;
+    if (/trazabilidad/i.test(texto) || /valorizaci/i.test(texto)) return; // ya tienen tarjeta propia
+
+    var empId = normalizarSucursal_(suc);
+    var mes = normalizarMes_(r[idxMes]);
+    var mesIdx = MESES.indexOf(mes);
+    var rawPct = idxPct === -1 ? "" : r[idxPct];
+    var detalle = idxDet === -1 ? "" : String(r[idxDet] || "").trim();
+    var s = String(rawPct === null || rawPct === undefined ? "" : rawPct).trim();
+
+    var avance = null, ok = null;
+    if (/^s[ií]$/i.test(s)) { avance = 100; ok = true; }
+    else if (/^no$/i.test(s)) { avance = 0; ok = false; }
+    else {
+      var n = normalizePercent_(rawPct);
+      if (n !== null) { avance = n; ok = n >= 100; }
+      else if (s && !detalle) { detalle = s; } // texto libre en la columna % cumplimiento
+    }
+
+    result[empId] = result[empId] || {};
+    var prev = result[empId][texto];
+    if (!prev || mesIdx > prev.mesIdx) {
+      result[empId][texto] = { mesIdx: mesIdx, avance: avance, ok: ok, detalle: detalle };
+    }
+  });
+
+  return result;
+}
+
+
+// ── Lectura de hojas ──
+
+function encontrarHoja_(candidatos) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  for (var i = 0; i < candidatos.length; i++) {
+    var sheet = ss.getSheetByName(candidatos[i]);
+    if (sheet) return sheet;
+  }
+  throw new Error("No se encontró ninguna hoja llamada: " + candidatos.join(" / "));
+}
+
+function getSheetRows_(candidatos) {
+  var sheet = encontrarHoja_(candidatos);
+  var data = sheet.getDataRange().getValues();
+  var headerRowIdx = -1;
+  for (var i = 0; i < data.length; i++) {
+    var cell = String(data[i][0] || "").trim().toLowerCase();
+    if (cell === "empresa_id") { headerRowIdx = i; break; }
+  }
+  if (headerRowIdx === -1) {
+    throw new Error("No se encontró la fila de encabezado ('empresa_id') en: " + sheet.getName());
+  }
+
+  var header = data[headerRowIdx].map(function (h) { return String(h || "").trim(); });
+  var rows = data.slice(headerRowIdx + 1);
+  return { header: header, rows: rows };
+}
+
+function leerTrazabilidad_() {
+  var sr = getSheetRows_(SHEET_TRAZA_CANDIDATOS);
+  var h = sr.header;
+  var idxSuc = h.indexOf("Sucursal");
+  var idxMes = h.indexOf("Mes");
+  var idxRes = h.indexOf("Residuo");
+  var idxImp = h.indexOf("Importaciones");
+  var docIdx = DOC_COLS.map(function (c) { return h.lastIndexOf(c); });
+  var idxComentario = -1;
+  for (var ci = 0; ci < COMENTARIO_HEADERS_CANDIDATOS.length && idxComentario === -1; ci++) {
+    idxComentario = h.indexOf(COMENTARIO_HEADERS_CANDIDATOS[ci]);
+  }
+
+  var sucursales = {};
+  var porEmpresaMes = {};
+  var comentariosPorEmpresaMes = {};
+
+  sr.rows.forEach(function (r) {
+    var suc = String(r[idxSuc] || "").trim();
+    if (!suc) return;
+    var empId = normalizarSucursal_(suc);
+    var mes = normalizarMes_(r[idxMes]);
+    var residuo = String(r[idxRes] || "").trim();
+    if (!mes || !residuo) return;
+
+    sucursales[empId] = suc;
+
+    var docs = {};
+    DOC_COLS.forEach(function (c, i) {
+      var col = docIdx[i];
+      docs[c] = col === -1 ? null : normalizeInt_(r[col]);
+    });
+
+    porEmpresaMes[empId] = porEmpresaMes[empId] || {};
+    porEmpresaMes[empId][mes] = porEmpresaMes[empId][mes] || [];
+    porEmpresaMes[empId][mes].push({
+      nombre: residuo,
+      imp: idxImp === -1 ? null : normalizeInt_(r[idxImp]),
+      docs: docs
+    });
+
+    if (idxComentario !== -1) {
+      var comentario = String(r[idxComentario] || "").trim();
+      if (comentario) {
+        comentariosPorEmpresaMes[empId] = comentariosPorEmpresaMes[empId] || {};
+        comentariosPorEmpresaMes[empId][mes] = comentariosPorEmpresaMes[empId][mes] || {};
+        comentariosPorEmpresaMes[empId][mes][comentario] = true;
+      }
+    }
+  });
+
+  return { sucursales: sucursales, porEmpresaMes: porEmpresaMes, comentarios: comentariosPorEmpresaMes };
+}
+
+function leerValorizacion_() {
+  var sr = getSheetRows_(SHEET_VAL_CANDIDATOS);
+  var h = sr.header;
+  var idxSuc = h.indexOf("Sucursal");
+  var idxTipo = h.indexOf("Tipo");
+  var mesIdx = MESES.map(function (m) { return h.indexOf(m); });
+
+  var valData = {};
+
+  sr.rows.forEach(function (r) {
+    var suc = String(r[idxSuc] || "").trim();
+    if (!suc) return;
+    var empId = normalizarSucursal_(suc);
+    var tipo = String(r[idxTipo] || "").trim().toLowerCase();
+
+    valData[empId] = valData[empId] || { meses: {}, meta: {}, acumulado: {} };
+
+    MESES.forEach(function (m, i) {
+      var col = mesIdx[i];
+      if (col === -1) return;
+      var val = normalizePercent_(r[col]);
+      if (val === null) return;
+      if (tipo.indexOf("acumulado") !== -1) valData[empId].acumulado[m] = val;
+      else if (tipo.indexOf("real") !== -1) valData[empId].meses[m] = val;
+      else if (tipo.indexOf("meta") !== -1) valData[empId].meta[m] = val;
+    });
+  });
+
+  return valData;
+}
+
+// Defensiva: la pestaña Seguimiento_CSE no existía en el doGet original —
+// si no está en el Sheet, devuelve datos vacíos en vez de romper el visor.
+function leerCSE_(empIdsValidos) {
+  var sr;
+  try {
+    sr = getSheetRows_(SHEET_CSE_CANDIDATOS);
+  } catch (err) {
+    return { cseData: {}, anualData: {} };
+  }
+  var h = sr.header;
+  var idxSuc = h.indexOf("Sucursal");
+  var idxAccion = h.indexOf("Acción CSE");
+  var mesIdx = MESES.map(function (m) { return h.indexOf(m); });
+
+  var mapAccion = {
+    "Correo seguimiento": "correo",
+    "Reunión seguimiento": "reunion",
+    "Encuesta seguimiento": "encuesta"
+  };
+
+  var cseData = {};
+  var anualData = {};
+
+  sr.rows.forEach(function (r) {
+    var sucNombre = String(r[idxSuc] || "").trim();
+    if (!sucNombre) return;
+
+    var empId = normalizarSucursal_(sucNombre);
+    if (!empIdsValidos[empId]) return;
+
+    var accion = String(r[idxAccion] || "").trim();
+    if (!accion) return;
+
+    cseData[empId] = cseData[empId] || { correo: {}, reunion: {}, encuesta: {}, fechas: {} };
+    anualData[empId] = anualData[empId] || {};
+    anualData[empId][accion] = anualData[empId][accion] || {};
+
+    var key = mapAccion[accion];
+
+    MESES.forEach(function (m, i) {
+      var col = mesIdx[i];
+      if (col === -1) return;
+      var v = normalizeSiNo_(r[col]);
+      if (v === undefined) return;
+      anualData[empId][accion][m] = v;
+      if (key) cseData[empId][key][m] = v;
+    });
+  });
+
+  return { cseData: cseData, anualData: anualData };
+}
+
+
+// ── Construcción del modelo para el visor ──
+
+function construirEmpresas_(traza, val, cse) {
+  var empresas = [];
+
+  Object.keys(traza.sucursales).sort().forEach(function (empId) {
+    var sucursal = traza.sucursales[empId];
+
+    var mensual = {};
+    var mesesDeEstaSucursal = Object.keys(traza.porEmpresaMes[empId] || {});
+    var comentariosEmp = traza.comentarios[empId] || {};
+    mesesDeEstaSucursal.forEach(function (mes) {
+      var comentariosMes = comentariosEmp[mes] || {};
+      mensual[mes] = {
+        residuos: traza.porEmpresaMes[empId][mes],
+        pendiente: "",
+        obs: Object.keys(comentariosMes).join(" · ")
+      };
+    });
+
+    var objetivos = [{ texto: "100% Trazabilidad" }];
+
+    var valInfo = val[empId] || { meses: {}, meta: {}, acumulado: {} };
+    var mesesValOrdenados = Object.keys(valInfo.meses)
+      .sort(function (a, b) { return MESES.indexOf(a) - MESES.indexOf(b); });
+    var ultimoMesVal = mesesValOrdenados[mesesValOrdenados.length - 1];
+
+    var mesesAcumOrdenados = Object.keys(valInfo.acumulado || {})
+      .sort(function (a, b) { return MESES.indexOf(a) - MESES.indexOf(b); });
+    var ultimoMesAcum = mesesAcumOrdenados[mesesAcumOrdenados.length - 1];
+
+    var avanceVal = ultimoMesAcum !== undefined
+      ? valInfo.acumulado[ultimoMesAcum]
+      : (ultimoMesVal !== undefined ? valInfo.meses[ultimoMesVal] : null);
+
+    var metaVal = (ultimoMesVal !== undefined && valInfo.meta[ultimoMesVal] !== undefined)
+      ? valInfo.meta[ultimoMesVal] : null;
+
+    var textoVal = metaVal !== null ? (metaVal + "% Valorización") : "Meta Valorización (sin definir)";
+    objetivos.push({
+      texto: textoVal,
+      avance: avanceVal,
+      ok: (metaVal !== null && avanceVal !== null) ? (avanceVal >= metaVal) : null
+    });
+
+    var cseInfo = cse.cseData[empId] || { correo: {}, reunion: {}, encuesta: {}, fechas: {} };
+    var anualInfo = cse.anualData[empId] || {};
+
+    empresas.push({
+      id: empId,
+      nombre: EMPRESA_NOMBRE,
+      sucursal: sucursal,
+      letra: letraFromSucursal_(sucursal),
+      color: EMPRESA_COLOR,
+      colorBg: EMPRESA_COLOR_L,
+      logo: null,
+      objetivos: objetivos,
+      cse: cseInfo,
+      mensual: mensual,
+      anual: anualInfo
+    });
+  });
+
+  return empresas;
+}
+
+function calcularMesesActivos_(traza, val, cse) {
+  var maxIdx = -1;
+  function scan(obj) {
+    Object.keys(obj || {}).forEach(function (m) {
+      var idx = MESES.indexOf(m);
+      if (idx > maxIdx) maxIdx = idx;
+    });
+  }
+  Object.keys(traza.porEmpresaMes).forEach(function (emp) { scan(traza.porEmpresaMes[emp]); });
+  Object.keys(val).forEach(function (emp) { scan(val[emp].meses); scan(val[emp].meta); scan(val[emp].acumulado); });
+  Object.keys(cse.anualData).forEach(function (emp) {
+    Object.keys(cse.anualData[emp]).forEach(function (accion) { scan(cse.anualData[emp][accion]); });
+  });
+  if (maxIdx < 0) return [];
+  return MESES.slice(0, maxIdx + 1);
+}
+
+
+// ── Helpers de normalización ──
+
+function normalizarMes_(raw) {
+  var m = String(raw || "").trim();
+  if (!m) return "";
+  for (var i = 0; i < MESES.length; i++) {
+    if (MESES[i].toLowerCase() === m.toLowerCase()) return MESES[i];
+  }
+  return m;
+}
+
+function normalizarSucursal_(s) {
+  return String(s || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function normalizeInt_(raw) {
+  if (raw === "" || raw === null || raw === undefined) return null;
+  var n = Number(raw);
+  return isNaN(n) ? null : n;
+}
+
+function normalizePercent_(raw) {
+  if (raw === "" || raw === null || raw === undefined) return null;
+  if (typeof raw === "number") {
+    var pct = raw <= 1 ? raw * 100 : raw;
+    return Math.round(pct * 10) / 10;
+  }
+  var s = String(raw).trim();
+  if (s === "") return null;
+  s = s.replace("%", "").replace(",", ".");
+  var n = parseFloat(s);
+  return isNaN(n) ? null : Math.round(n * 10) / 10;
+}
+
+function normalizeSiNo_(raw) {
+  if (raw === "" || raw === null || raw === undefined) return undefined;
+  var s = String(raw).trim().toUpperCase();
+  if (s === "SI" || s === "SÍ") return true;
+  if (s === "NO") return false;
+  return undefined;
+}
+
+function letraFromSucursal_(s) {
+  var stop = ["de", "la", "el", "los", "las", "del", "y"];
+  var words = String(s || "").split(/\s+/).filter(function (w) {
+    return w && stop.indexOf(w.toLowerCase()) === -1;
+  });
+  var letras = words.slice(0, 2).map(function (w) { return w.charAt(0).toUpperCase(); }).join("");
+  if (letras.length < 2 && s && s.length >= 2) letras = s.substring(0, 2).toUpperCase();
+  return letras || "??";
+}
+
+
+// ============================================================
+// DOGET FUSIONADO — despacha según el parámetro de la URL
+// ============================================================
+
 function doGet(e) {
+  const params = (e && e.parameter) || {};
+
+  if (params.minutas === '1') return doGetMinutas_(e);
+
+  // El visor standalone "Visor-de-Objetivos-SALFA" es EL MISMO archivo que
+  // "Visor-de-Objetivos-Abastible" (solo cambian nombre/color/URL) — llama
+  // con un <script src="...exec?callback=X"> SIN "visor=1" (ver
+  // Code-Abastible.gs, doGet). Por eso cualquier request con "callback"
+  // activa el payload del visor, no solo "?visor=1" (que se deja como
+  // alias explícito por si algún consumidor futuro lo usa).
+  if (params.visor === '1' || params.callback) return doGetVisor_(e);
+
+  // Sin ninguno de esos parámetros: comportamiento EXACTO al que ya había
+  // (usado por el visor principal valorizacion-recylink).
+  return doGetClasico_(e);
+}
+
+// ── LO QUE YA HABÍA, RENOMBRADO (comportamiento intacto) ──
+function doGetClasico_(e) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const startRow = 6;
 
@@ -232,4 +842,45 @@ function doGet(e) {
   return ContentService
     .createTextOutput(JSON.stringify(result))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+
+// ── Utilidades para probar desde el editor ──
+
+// Ejecutar → testBuildPayload, luego revisa Ver → Registros de ejecución
+function testBuildPayload() {
+  var payload = buildPayload_();
+  Logger.log(JSON.stringify(payload, null, 2));
+}
+
+// Ejecutar → testReadMinutas, luego revisa Ver → Registros de ejecución
+function testReadMinutas() {
+  var sheet = encontrarHojaMinuta_();
+  var lastRow = sheet.getLastRow();
+  var lastCol = Math.max(sheet.getLastColumn(), 5);
+  var rows = lastRow > 0 ? sheet.getRange(1, 1, lastRow, lastCol).getValues() : [];
+  Logger.log(JSON.stringify(rows.slice(0, 40), null, 2));
+}
+
+// Ejecutar → testWriteMinutas, luego revisa Ver → Registros de ejecución.
+// NOTA: ajusta headerRow/dataStartRow/colMap a una sesión real de la pestaña
+// Minuta (usa testReadMinutas() para ver los números de fila y el orden real
+// de columnas) antes de correrlo.
+function testWriteMinutas() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var fakeData = {
+    sessions: [
+      {
+        title: "Prueba",
+        headerRow: 1,
+        dataStartRow: 3,
+        colMap: { item:0, cumplido:4, comentario:2, acuerdos:3, revisado:1 }, // orden de Salfa: Tema,Revisado,Detalle,Acuerdos,Resuelto
+        items: [
+          { item: "Ítem de prueba (borrar después)", cumplido: true, comentario: "Comentario de prueba", acuerdos: "Acuerdo de prueba", revisado: true }
+        ]
+      }
+    ]
+  };
+  writeMinutas_(ss, fakeData);
+  Logger.log("Listo — revisa la hoja de Minutas.");
 }
