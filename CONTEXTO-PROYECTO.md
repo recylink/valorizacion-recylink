@@ -2290,6 +2290,25 @@ badge "0/4" correcto, tarjeta de segregación visible, PDF sin mención de Valor
 probablemente compartido por CUALQUIER otro visor clonado de `Seguimiento-Abastible` cuya
 empresa no tenga Valorización entre sus objetivos reales.
 
+## Salfa: "Asegurar segregación" quedaba en "sin dato" aunque estaba cumplido — 2026-09-01
+Tras el fix anterior (mostrar la tarjeta de segregación), el usuario notó que aparecía como
+"—" (sin dato) con Detalle "Madera", pero debería figurar como cumplido — Madera es
+precisamente la evidencia de que la segregación se hizo bien.
+
+Causa: `calcObjetivos()` (`valorizacion-recylink.html`, tipo `segregacion_anual`) escribe
+literalmente el string **"OK"** en la columna "% cumplimiento" cuando el objetivo se cumple (no
+"Sí" como el resto de los tipos anuales binarios) — ver línea `estado=otrosResAnual.length>0?
+'OK':'No'`. `leerObjetivosReales_()` en `Code-Salfa.gs` solo reconocía `/^s[ií]$/i` y `/^no$/i`;
+"OK" no matcheaba ninguno de los 2, tampoco un número, y como la columna Detalle ya traía el
+residuo, tampoco entraba en el fallback de "texto libre" — resultado: avance/ok quedaban en
+`null` ("sin dato") pese a que el objetivo SÍ estaba cumplido.
+
+Fix: el regex ahora reconoce también "OK" (`/^(s[ií]|ok)$/i`). Verificado con harness de Node:
+una fila con `% cumplimiento="OK"` y `Detalle="Madera"` ahora devuelve `avance:100, ok:true`.
+
+**Importante**: hay que volver a pegar `Code-Salfa.gs` en el editor de Apps Script de Salfa y
+crear una nueva versión de despliegue.
+
 ## Cómo verificar sintaxis JS del archivo
 El HTML es un solo archivo con `<script>...</script>` embebido. Para validar sintaxis:
 ```bash

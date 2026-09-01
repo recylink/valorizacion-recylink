@@ -518,8 +518,14 @@ function leerObjetivosReales_() {
     var detalle = idxDet === -1 ? "" : String(r[idxDet] || "").trim();
     var s = String(rawPct === null || rawPct === undefined ? "" : rawPct).trim();
 
+    // "segregacion_anual" (calcObjetivos() en valorizacion-recylink.html)
+    // escribe literalmente "OK"/"No" en esta columna (no "Sí"/"No" como el
+    // resto de los tipos anuales tipo Sí/No) — sin este caso, "OK" no
+    // matcheaba ni Sí/No ni un número, y como Detalle ya traía el residuo
+    // (ej. "Madera"), quedaba como avance/ok null ("sin dato") aunque el
+    // objetivo SÍ estaba cumplido.
     var avance = null, ok = null;
-    if (/^s[ií]$/i.test(s)) { avance = 100; ok = true; }
+    if (/^(s[ií]|ok)$/i.test(s)) { avance = 100; ok = true; }
     else if (/^no$/i.test(s)) { avance = 0; ok = false; }
     else {
       var n = normalizePercent_(rawPct);
