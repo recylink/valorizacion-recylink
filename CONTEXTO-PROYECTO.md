@@ -2239,6 +2239,33 @@ posición correcta: `["Obra A","2026","Marzo","Escombro","Valorizado","No respel
 `Code-Salfa.gs` actualizado en el editor de Apps Script y crear una nueva versión de
 despliegue.
 
+## Salfa: el visor standalone mostraba objetivos que no son de Salfa — 2026-09-01
+El usuario probó el visor nuevo (con datos reales en vivo) e indicó que los objetivos reales de
+Salfa son solo 4: "KPI Costo ingreso", "100% trazabilidad", "Asegurar una correcta segregación
+de residuos" y "cumplir declaración SINADER" — coincide exactamente con
+`EMPRESAS.salfa.objetivos` en `valorizacion-recylink.html` (trazabilidad/sinader/kpi_costo/
+segregacion). Pero el visor mostraba 6: esos 4 más "0% Valorización" y "Documentos
+adicionales".
+
+- **"Documentos adicionales"**: es una fila que queda en la hoja "🎯 Objetivos" (la sincroniza
+  `calcObjetivos()` del visor principal) pero no corresponde a ninguno de los 4 objetivos
+  configurados para Salfa. Se agregó a la exclusión de `leerObjetivosReales_()` en
+  `Code-Salfa.gs` (mismo criterio que ya excluía "trazabilidad"/"valorizaci[ón]").
+- **"% Valorización"**: `construirEmpresas_()` armaba esta tarjeta de forma incondicional para
+  CUALQUIER sucursal con datos en la hoja Valorización — pero Salfa no tiene Valorización entre
+  sus objetivos reales (a diferencia de Abastible/Gespania, que sí la tienen configurada). Se
+  quitó ese bloque completo del backend de Salfa. El % de Valorización real sigue visible en la
+  pestaña "♻️ Valorización" del visor (lee `VAL_DATA` directo) — solo se dejó de duplicar como
+  tarjeta de "objetivo".
+
+Verificado con harness de Node (mock de hojas Trazabilidad/Valorización/Objetivos): con las
+mismas 4 filas reales + "Documentos adicionales" en la hoja, `buildPayload_()` ahora devuelve
+exactamente `["100% Trazabilidad", "cumplir declaración SINADER", "KPI Costo ingreso",
+"Asegurar una correcta segregación de residuos"]`.
+
+**Importante**: hay que volver a pegar `Code-Salfa.gs` en el editor de Apps Script de Salfa y
+crear una nueva versión de despliegue para que tome efecto.
+
 ## Cómo verificar sintaxis JS del archivo
 El HTML es un solo archivo con `<script>...</script>` embebido. Para validar sintaxis:
 ```bash

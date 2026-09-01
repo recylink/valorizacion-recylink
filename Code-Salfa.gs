@@ -502,7 +502,14 @@ function leerObjetivosReales_() {
     var suc = String(r[idxSuc] || "").trim();
     var texto = String(r[idxObj] || "").trim();
     if (!suc || !texto) return;
-    if (/trazabilidad/i.test(texto) || /valorizaci/i.test(texto)) return; // ya tienen tarjeta propia
+    // "Trazabilidad"/"Valorización" ya tienen tarjeta propia (ver
+    // construirEmpresas_). "Documentos adicionales" NO es uno de los 4
+    // objetivos reales de Salfa (ver EMPRESAS.salfa.objetivos en
+    // valorizacion-recylink.html: trazabilidad, sinader, kpi_costo,
+    // segregacion) — es una fila que calcObjetivos() sincroniza a la hoja
+    // pero que no corresponde a un objetivo definido para esta empresa, así
+    // que se excluye del visor standalone (2026-09-01, a pedido del usuario).
+    if (/trazabilidad/i.test(texto) || /valorizaci/i.test(texto) || /documentos/i.test(texto)) return;
 
     var empId = normalizarSucursal_(suc);
     var mes = normalizarMes_(r[idxMes]);
@@ -717,30 +724,15 @@ function construirEmpresas_(traza, val, cse) {
       };
     });
 
+    // Los 4 objetivos reales de Salfa son trazabilidad/sinader/kpi_costo/
+    // segregacion (ver EMPRESAS.salfa.objetivos en valorizacion-recylink.html)
+    // — NO incluyen Valorización, así que a diferencia de otros backends
+    // (Abastible, Gespania) no se agrega una tarjeta sintética de
+    // "% Valorización" aquí (2026-09-01, a pedido del usuario: esa tarjeta
+    // aparecía sin corresponder a ninguno de sus objetivos reales). El % de
+    // Valorización real sigue disponible en la pestaña "♻️ Valorización" del
+    // visor (lee VAL_DATA directo), solo no se duplica como "objetivo".
     var objetivos = [{ texto: "100% Trazabilidad" }];
-
-    var valInfo = val[empId] || { meses: {}, meta: {}, acumulado: {} };
-    var mesesValOrdenados = Object.keys(valInfo.meses)
-      .sort(function (a, b) { return MESES.indexOf(a) - MESES.indexOf(b); });
-    var ultimoMesVal = mesesValOrdenados[mesesValOrdenados.length - 1];
-
-    var mesesAcumOrdenados = Object.keys(valInfo.acumulado || {})
-      .sort(function (a, b) { return MESES.indexOf(a) - MESES.indexOf(b); });
-    var ultimoMesAcum = mesesAcumOrdenados[mesesAcumOrdenados.length - 1];
-
-    var avanceVal = ultimoMesAcum !== undefined
-      ? valInfo.acumulado[ultimoMesAcum]
-      : (ultimoMesVal !== undefined ? valInfo.meses[ultimoMesVal] : null);
-
-    var metaVal = (ultimoMesVal !== undefined && valInfo.meta[ultimoMesVal] !== undefined)
-      ? valInfo.meta[ultimoMesVal] : null;
-
-    var textoVal = metaVal !== null ? (metaVal + "% Valorización") : "Meta Valorización (sin definir)";
-    objetivos.push({
-      texto: textoVal,
-      avance: avanceVal,
-      ok: (metaVal !== null && avanceVal !== null) ? (avanceVal >= metaVal) : null
-    });
 
     var cseInfo = cse.cseData[empId] || { correo: {}, reunion: {}, encuesta: {}, fechas: {} };
     var anualInfo = cse.anualData[empId] || {};
