@@ -2176,6 +2176,33 @@ Sheet de Salfa (`1LtRSJ-ZYPYoFmGHUik03OAVYxzg9REPn5NTIGhostGI`) y crear una nuev
 despliegue para que el visor standalone funcione. No hace falta tocar
 `Visor-de-Objetivos-SALFA/index.html` — ya está bien tal como está.
 
+## Salfa: Total Residuos y Costo e Ingreso se borraban completos al subir un mes suelto — 2026-09-01
+El usuario preguntó si Salfa tiene el mismo resguardo que Euro/Socovesa/Gespania para no
+perder histórico al subir solo el Excel del mes nuevo. Revisando las 5 hojas que sincroniza
+Salfa:
+
+- **Valorización, Trazabilidad_Docs, Objetivos: ya estaban seguras** — el fix genérico del
+  cliente (`precargarDesdeSheetsSilencioso_`, ver sección "Socovesa: no perder sucursales/meses
+  históricos") preserva `valMatrix`/`mesesDisp` con todo el histórico, y las claves de borrado
+  de `Code-Salfa.gs` (`empresa_id+Tipo` / `empresa_id+Mes`) solo tocan lo que el cliente
+  reenvía completo en cada sync — sin bug.
+- **Total Residuos y Costo e Ingreso: SÍ se borraban completos.** `writeTotalResiduos` y
+  `writeCostoIngreso` hacían `clearContent()` sobre TODA la hoja de datos y solo reinsertaban
+  lo que el cliente manda en esa sincronización — pero el cliente arma `totalResiduosRows`/
+  `costoIngresoRows` únicamente a partir del Excel recién subido (nunca los mezcla con lo
+  histórico, a diferencia de `valMatrix`), así que un Excel de un solo mes efectivamente
+  borraba TODOS los meses anteriores de esas 2 hojas. Corregido a borrado selectivo por
+  Sucursal+Mes (Salfa no tiene columna Año en estas hojas, así que no hace falta Año en la
+  clave) — mismo patrón ya aplicado en `writeTotalResiduos` de Gespania/Euro.
+
+**Nota pendiente, no corregida**: `Code-Abastible.gs`, `Code-Ando.gs` y `Code-CCU.gs` tienen
+exactamente el mismo patrón de borrado completo en `writeTotalResiduos`/`writeCostoIngreso` —
+no se tocaron porque no fue pedido, pero probablemente tengan el mismo problema si alguna de
+esas 3 empresas sube el Excel de un solo mes.
+
+**Importante**: hay que volver a pegar `Code-Salfa.gs` en el editor de Apps Script de Salfa y
+crear una nueva versión de despliegue para que el fix tome efecto.
+
 ## Cómo verificar sintaxis JS del archivo
 El HTML es un solo archivo con `<script>...</script>` embebido. Para validar sintaxis:
 ```bash

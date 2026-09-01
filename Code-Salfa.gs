@@ -163,19 +163,37 @@ function buscarFilaEncabezado_(sheet, valorEsperado) {
   return null;
 }
 
+// FIX (2026-09-01): antes hacía sheet.getRange(...).clearContent() sobre
+// TODA la hoja de datos y solo reinsertaba lo que mandaba el cliente en esta
+// sincronización — como el cliente solo envía las filas del Excel recién
+// subido (no las de meses anteriores), un Excel de un solo mes borraba el
+// histórico completo de Total Residuos (mismo bug ya encontrado y corregido
+// en Code-Gespania.gs y Code-Euro.gs). Ahora reemplaza SOLO las filas cuya
+// Sucursal+Mes coincide con lo que trae el Excel — el resto de
+// sucursales/meses no tocados por esta carga queda intacto. Salfa no tiene
+// columna Año en esta hoja, así que la clave es Sucursal+Mes (no
+// Sucursal+Año+Mes como en Euro/Gespania).
 function writeTotalResiduos(ss, data) {
   var sheet = ss.getSheetByName('Total Residuos');
   if (!sheet) throw new Error('Hoja "Total Residuos" no encontrada');
   var headerRow = buscarFilaEncabezado_(sheet, 'Sucursal');
   if (!headerRow) throw new Error('No se encontro la fila de encabezado ("Sucursal") en Total Residuos');
   var startRow = headerRow + 1;
-  var numCols = 8; // Sucursal | Mes | Residuo | Valorizado/No Valorizado | Respel no respel | Total KG | Total M3 | Tons. CO2eq. evitadas
   var lastRow = sheet.getLastRow();
-  if (lastRow >= startRow) {
-    sheet.getRange(startRow, 1, lastRow - startRow + 1, numCols).clearContent();
-  }
+
   if (data.filas && data.filas.length > 0) {
-    sheet.getRange(startRow, 1, data.filas.length, data.filas[0].length).setValues(data.filas);
+    var keys = new Set(data.filas.map(function (f) { return String(f[0]) + '|' + String(f[1]); }));
+    if (lastRow >= startRow) {
+      var cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 2).getValues();
+      var toDelete = [];
+      cols.forEach(function (r, i) {
+        var key = String(r[0]) + '|' + String(r[1]);
+        if (keys.has(key)) toDelete.push(startRow + i);
+      });
+      toDelete.reverse().forEach(function (r) { sheet.deleteRow(r); });
+    }
+    var insertRow = sheet.getLastRow() + 1;
+    sheet.getRange(insertRow, 1, data.filas.length, data.filas[0].length).setValues(data.filas);
   }
 }
 
@@ -199,22 +217,35 @@ function readRespelSheet_() {
 
 // ── Costo e Ingreso por residuo ──
 // Esta función faltaba en el script original (doPost ya la llamaba pero no
-// existía). Mismo patrón que writeTotalResiduos: reemplaza TODAS las filas
-// de datos por las que manda el cliente (headers: Sucursal | Mes | Residuo |
-// Total KG | Costo Total | Ingreso Total | Neto (Ingreso - Costo)).
+// existía). Headers: Sucursal | Mes | Residuo | Total KG | Costo Total |
+// Ingreso Total | Neto (Ingreso - Costo).
+//
+// FIX (2026-09-01): mismo bug que writeTotalResiduos — reemplazaba TODA la
+// hoja con solo lo que manda el cliente en esta sincronización (el Excel
+// recién subido), borrando el histórico de meses anteriores. Ahora
+// reemplaza solo las filas cuya Sucursal+Mes coincide con lo que trae el
+// Excel.
 function writeCostoIngreso(ss, data) {
   var sheet = ss.getSheetByName('Costo e Ingreso');
   if (!sheet) throw new Error('Hoja "Costo e Ingreso" no encontrada');
   var headerRow = buscarFilaEncabezado_(sheet, 'Sucursal');
   if (!headerRow) throw new Error('No se encontro la fila de encabezado ("Sucursal") en Costo e Ingreso');
   var startRow = headerRow + 1;
-  var numCols = 7; // Sucursal | Mes | Residuo | Total KG | Costo Total | Ingreso Total | Neto (Ingreso - Costo)
   var lastRow = sheet.getLastRow();
-  if (lastRow >= startRow) {
-    sheet.getRange(startRow, 1, lastRow - startRow + 1, numCols).clearContent();
-  }
+
   if (data.filas && data.filas.length > 0) {
-    sheet.getRange(startRow, 1, data.filas.length, data.filas[0].length).setValues(data.filas);
+    var keys = new Set(data.filas.map(function (f) { return String(f[0]) + '|' + String(f[1]); }));
+    if (lastRow >= startRow) {
+      var cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 2).getValues();
+      var toDelete = [];
+      cols.forEach(function (r, i) {
+        var key = String(r[0]) + '|' + String(r[1]);
+        if (keys.has(key)) toDelete.push(startRow + i);
+      });
+      toDelete.reverse().forEach(function (r) { sheet.deleteRow(r); });
+    }
+    var insertRow = sheet.getLastRow() + 1;
+    sheet.getRange(insertRow, 1, data.filas.length, data.filas[0].length).setValues(data.filas);
   }
 }
 
