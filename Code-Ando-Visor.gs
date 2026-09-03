@@ -78,18 +78,27 @@ function doPost(e) {
 // cosa (ej. solo "% Real" de un mes nuevo) borraba de paso "% Acumulado" y
 // "Meta %" de la misma sucursal, aunque no vinieran en data.filas. Mismo
 // tipo de bug ya encontrado y corregido en Code-Gespania.gs/
-// Code-Socovesa.gs/Code-Salfa.gs/Code-Euro.gs. ANDO no tiene columna Año en
-// esta hoja, así que la clave queda en empresa_id+Tipo (sin Año).
+// Code-Socovesa.gs/Code-Salfa.gs/Code-Euro.gs.
+//
+// FIX 2 (2026-09-03, a pedido del usuario: "integrar el año en el sheets"):
+// esta hoja YA tenía el header "Año" (columna D, copiado de la plantilla
+// Euro/Gespania/Vital), pero como el cliente nunca lo mandaba, la fila
+// escrita [empresa_id,Sucursal,Tipo,Enero..Diciembre] (15 campos) quedaba
+// corrida bajo un header de 16 celdas — "Enero" caía bajo el header "Año",
+// "Febrero" bajo "Enero", etc. Ahora que EMPRESAS_VAL_CON_ANIO incluye
+// 'ando', el cliente manda [empresa_id,Sucursal,Tipo,Año,Enero..Diciembre]
+// (16 campos) — se agrega el Año a la clave de borrado (empresa_id+Tipo+Año,
+// mismo patrón que Code-Euro.gs) para no pisar años distintos entre sí.
 function writeValorizacion(ss, data) {
   const sheet = ss.getSheetByName('♻️ Valorización') || ss.getSheetByName('Valorización');
   if (!sheet) throw new Error('Hoja Valorización no encontrada');
   const startRow = 6;
   const lastRow = sheet.getLastRow();
   if (lastRow >= startRow) {
-    const cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 3).getValues();
-    const keys = new Set(data.filas.map(f => f[0] + '|' + f[2]));
+    const cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 4).getValues();
+    const keys = new Set(data.filas.map(f => f[0] + '|' + f[2] + '|' + f[3]));
     const toDelete = [];
-    cols.forEach((r, i) => { if (keys.has(r[0] + '|' + r[2])) toDelete.push(startRow + i); });
+    cols.forEach((r, i) => { if (keys.has(r[0] + '|' + r[2] + '|' + r[3])) toDelete.push(startRow + i); });
     toDelete.reverse().forEach(r => sheet.deleteRow(r));
   }
   const insertRow = sheet.getLastRow() + 1;
@@ -98,6 +107,11 @@ function writeValorizacion(ss, data) {
   });
 }
 
+// FIX (2026-09-03): syncMetas() manda una fila "Meta %" POR AÑO (ver
+// EMPRESAS_VAL_CON_ANIO en el cliente) — sin el Año en la comparación, la
+// 2da fila (ej. 2026) sobreescribiría la de OTRO año (ej. 2025) que ya
+// había matcheado con la 1ra, perdiendo esa meta. Mismo fix ya aplicado en
+// Code-Euro.gs/Code-Gespania.gs.
 function writeMetas(ss, data) {
   const sheet = ss.getSheetByName('♻️ Valorización') || ss.getSheetByName('Valorización');
   if (!sheet) throw new Error('Hoja Valorización no encontrada');
@@ -109,9 +123,10 @@ function writeMetas(ss, data) {
 
   data.filas.forEach(function(fila) {
     const id = fila[0];
+    const anio = fila[3];
     let found = false;
     rows.forEach(function(row, i) {
-      if (row[0] === id && row[2] === 'Meta %') {
+      if (row[0] === id && row[2] === 'Meta %' && String(row[3]) === String(anio)) {
         sheet.getRange(startRow + i, 1, 1, fila.length).setValues([fila]);
         found = true;
       }
@@ -122,16 +137,22 @@ function writeMetas(ss, data) {
   });
 }
 
+// FIX (2026-09-03, a pedido del usuario: "integrar el año en el sheets"):
+// mismo caso que writeValorizacion — la hoja ya tenía el header "Año"
+// (columna D) sin usar, corriendo Residuo/Código LER/etc. una columna. Ahora
+// que EMPRESAS_OBJ_CON_ANIO... (ver nota en el cliente) el cliente manda
+// [empresa_id,Sucursal,Mes,Año,Residuo,...] — se agrega el Año a la clave de
+// borrado (empresa_id+Mes+Año) para no pisar el mismo mes de otro año.
 function writeTrazabilidad(ss, data) {
   const sheet = ss.getSheetByName('📊 Trazabilidad_Docs') || ss.getSheetByName('Trazabilidad_Docs');
   if (!sheet) throw new Error('Hoja Trazabilidad_Docs no encontrada');
   const startRow = 6;
   const lastRow = sheet.getLastRow();
   if (lastRow >= startRow) {
-    const cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 3).getValues();
-    const keys = new Set(data.filas.map(f => f[0] + '|' + f[2]));
+    const cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 4).getValues();
+    const keys = new Set(data.filas.map(f => f[0] + '|' + f[2] + '|' + f[3]));
     const toDelete = [];
-    cols.forEach((r, i) => { if (keys.has(r[0] + '|' + r[2])) toDelete.push(startRow + i); });
+    cols.forEach((r, i) => { if (keys.has(r[0] + '|' + r[2] + '|' + r[3])) toDelete.push(startRow + i); });
     toDelete.reverse().forEach(r => sheet.deleteRow(r));
   }
   const insertRow = sheet.getLastRow() + 1;
@@ -140,16 +161,29 @@ function writeTrazabilidad(ss, data) {
   });
 }
 
+// FIX (2026-09-03, a pedido del usuario: "integrar el año en el sheets"):
+// el header de esta hoja YA tenía las 7 celdas [empresa_id,Sucursal,Mes,
+// Año,Objetivo,"% cumplimiento",Detalle] (copiado de la plantilla Euro/
+// Gespania/Vital), pero como el cliente solo mandaba 6 campos sin Año
+// [empresa_id,Sucursal,Mes,texto,estado,detalle], todo quedaba corrido una
+// columna: el texto del objetivo caía bajo el header "Año", el estado bajo
+// "Objetivo" y el detalle bajo "% cumplimiento" (ver leerObjetivosReales_,
+// que hasta ahora compensaba leyendo por esos nombres "corridos"). Ahora que
+// EMPRESAS_OBJ_CON_ANIO incluye 'ando', el cliente manda
+// [empresa_id,Sucursal,Mes,Año,texto,estado,detalle] (7 campos, alineados
+// con el header real) — se agrega el Año a la clave de borrado
+// (empresa_id+Mes+Año+Objetivo, mismo patrón que Code-Euro.gs) para no
+// pisar el mismo objetivo+mes de otro año.
 function writeObjetivos(ss, data) {
   const sheet = ss.getSheetByName('🎯 Objetivos') || ss.getSheetByName('Objetivos');
   if (!sheet) throw new Error('Hoja Objetivos no encontrada');
   const startRow = 6;
   const lastRow = sheet.getLastRow();
   if (lastRow >= startRow) {
-    const cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 3).getValues();
-    const keys = new Set(data.filas.map(f => f[0] + '|' + f[2]));
+    const cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 5).getValues();
+    const keys = new Set(data.filas.map(f => f[0] + '|' + f[2] + '|' + f[3] + '|' + f[4]));
     const toDelete = [];
-    cols.forEach((r, i) => { if (keys.has(r[0] + '|' + r[2])) toDelete.push(startRow + i); });
+    cols.forEach((r, i) => { if (keys.has(r[0] + '|' + r[2] + '|' + r[3] + '|' + r[4])) toDelete.push(startRow + i); });
     toDelete.reverse().forEach(r => sheet.deleteRow(r));
   }
   const insertRow = sheet.getLastRow() + 1;
@@ -710,17 +744,17 @@ function letraFromSucursal_(s) {
 // pedido del usuario: "no se hace seguimiento de los 4 objetivos que se
 // muestran en la hoja objetivos 2026").
 //
-// OJO — el header de esta hoja en Ando quedó mal etiquetado (parece copiado
-// del formato Año-aware sin usarlo realmente): la columna con el TEXTO del
-// objetivo está bajo el header "Año" (no "Objetivo"), y la columna con el
-// ESTADO (fracción 0-1, o "OK"/"No") está bajo el header "Objetivo" (no
-// "% cumplimiento"). Confirmado con curl al deployment real 2026-09-03:
-// writeObjetivos() solo escribe 6 columnas posicionales [empresa_id,
-// Sucursal, Mes, texto, estado, detalle], pero la fila de encabezado real
-// tiene 7 celdas (con un "Año" de más antes de "Objetivo") — así que todo
-// queda corrido una columna respecto a lo que dice el header. Se lee por
-// esos nombres de header tal como están hoy para no tener que pedirle al
-// usuario que edite manualmente la planilla.
+// FIX (2026-09-03, a pedido del usuario: "integrar el año en el sheets"):
+// hasta ahora el cliente nunca mandaba la columna Año (aunque el header ya
+// la tenía, copiada de la plantilla Euro/Gespania/Vital), así que todo
+// quedaba corrido una columna — el texto caía bajo "Año", el estado bajo
+// "Objetivo", el detalle bajo "% cumplimiento" — y esta función leía por
+// esos nombres "corridos" para compensar. Ahora que EMPRESAS_OBJ_CON_ANIO
+// incluye 'ando' en el cliente, las filas nuevas vienen alineadas con el
+// header real — se vuelve a leer por los nombres correctos. OJO: filas
+// viejas (sincronizadas antes de este fix) van a seguir corridas hasta que
+// se vuelvan a sincronizar — conviene resincronizar todos los meses del año
+// una vez desplegado este cambio para limpiar el historial.
 function leerObjetivosReales_() {
   var sr;
   try {
@@ -731,9 +765,9 @@ function leerObjetivosReales_() {
   var h = sr.header;
   var idxSuc = h.indexOf("Sucursal");
   var idxMes = h.indexOf("Mes");
-  var idxTexto = h.indexOf("Año");            // ver nota arriba: en realidad es el texto del objetivo
-  var idxEstado = h.indexOf("Objetivo");      // ver nota arriba: en realidad es el estado (0-1 / OK / No)
-  var idxDet = h.indexOf("% cumplimiento");   // ver nota arriba: en realidad es el detalle descriptivo
+  var idxTexto = h.indexOf("Objetivo");
+  var idxEstado = h.indexOf("% cumplimiento");
+  var idxDet = h.indexOf("Detalle");
 
   var result = {}; // empId -> texto -> { mesIdx, avance, ok, detalle }
 

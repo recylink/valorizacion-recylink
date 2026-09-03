@@ -590,12 +590,20 @@ var META_VAL_OBJ_NOMBRE = '% Valorización vs. meta';
 // Socovesa, a pedido del usuario) — cualquier fila de objetivos que el
 // visor sincronice para estas empresas debe incluir el Año o queda todo
 // corrido una columna.
-var EMPRESAS_OBJ_CON_ANIO = {euro:1, socovesa:1, gespania:1, vital:1};
+// Ando (2026-09-03, a pedido del usuario): la hoja "🎯 Objetivos" YA tenía el
+// header "Año" (copiado de la plantilla Euro/Gespania/Vital al crear el
+// Sheet), pero como nunca se le escribía nada, todo quedaba corrido una
+// columna (el texto del objetivo caía bajo el header "Año", el estado bajo
+// "Objetivo", etc.) — ver Code-Ando-Visor.gs, leerObjetivosReales_. Al
+// agregar 'ando' acá, autoSync() empieza a escribir la columna Año de
+// verdad y el corrimiento se autocorrige solo en el próximo sync.
+var EMPRESAS_OBJ_CON_ANIO = {euro:1, socovesa:1, gespania:1, vital:1, ando:1};
 // Mismo caso para la hoja "♻️ Valorización": Euro, Socovesa y (desde
 // 2026-08-31) Gespania tienen una columna Año agregada (empresa_id,
 // Sucursal, Tipo, Año, ene%, feb%, ...) en vez del formato original sin
-// Año — ver Code-Socovesa.gs FIX 3.
-var EMPRESAS_VAL_CON_ANIO = {euro:1, socovesa:1, gespania:1, vital:1};
+// Año — ver Code-Socovesa.gs FIX 3. Ando tenía el mismo header "Año" sin
+// usar (mismo corrimiento de columnas que en Objetivos, ver nota arriba).
+var EMPRESAS_VAL_CON_ANIO = {euro:1, socovesa:1, gespania:1, vital:1, ando:1};
 
 var ABASTIBLE_METAS = {
   'Planta Concón': 15,
@@ -1684,8 +1692,14 @@ function autoSync(rows) {
   // Cert. tratamiento, Factura, Cert. declaración, Transportista,
   // Disposición final, Comentario por sucursal).
   var esVitalTraz = empresaActual === 'vital';
+  // Ando (2026-09-03): mismo caso que Vital — el header "Año" ya existía sin
+  // usar en 📊 Trazabilidad_Docs, con el mismo orden de columnas que Euro/
+  // Gespania (confirmado con curl: Sucursal, Mes, Año, Residuo, Código LER,
+  // Importaciones, Cert. tratamiento, Factura, Cert. declaración,
+  // Transportista, Disposición final — coincide con emp.trazCols de Ando).
+  var esAndoTraz = empresaActual === 'ando';
   var filasTraz = trazRows.map(function(r){
-    if (esEuroTraz || esGespaniaTraz || esVitalTraz) {
+    if (esEuroTraz || esGespaniaTraz || esVitalTraz || esAndoTraz) {
       return [sucId(r.suc), r.suc, MESES_ES[parseInt(r.mes.slice(5))], r.mes.slice(0,4), r.residuo, r.ler, r.imp, r.cert, r.factura, r.decl, r.transp, r.disp];
     }
     if (esSocovesaTraz) {
