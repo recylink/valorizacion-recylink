@@ -1644,8 +1644,9 @@ function autoSync(rows) {
   // viene vacio para el resto de empresas (ver processData()).
   // Salfa agrego columna Año (col. B, mismo lugar que en Total Residuos) el
   // 2026-09-01, mismo motivo: no perder historico entre años al subir el
-  // Excel de un solo mes.
-  var generaAnioCI = empresaActual === 'salfa';
+  // Excel de un solo mes. Ando agrego la misma columna el 2026-09-03 (a
+  // pedido del usuario, hoja creada con esa estructura desde el principio).
+  var generaAnioCI = empresaActual === 'salfa' || empresaActual === 'ando';
   var filasCostoIngreso = costoIngresoRows.map(function(r){
     var row = [r.suc];
     if (generaAnioCI) row.push(r.mes.slice(0,4));

@@ -227,11 +227,14 @@ function writeTotalResiduos(ss, data) {
 // El cliente ya mandaba tipo:'costoIngreso' desde hace tiempo (ver autoSync()
 // en valorizacion-recylink.html, filasCostoIngreso), pero doPost no tenía
 // ningún caso para ese tipo — los datos se perdían en silencio en cada sync.
-// Fila: [Sucursal, Mes, Residuo, Total KG, Costo Total, Ingreso Total, Neto]
-// — SIN columna Año (a diferencia de Salfa, que sí la agregó) porque el
-// cliente hoy no la manda para Ando (generaAnioCI solo es true para salfa).
-// Reemplaza solo las filas cuya Sucursal+Mes coincide con lo que llega
-// (no borra la hoja entera, a diferencia de writeTotalResiduos de arriba).
+//
+// FIX (2026-09-03): el usuario creó la hoja con columna Año incluida
+// (Sucursal | Año | Mes | Residuo | Total KG | Costo Total | Ingreso Total |
+// Neto, mismo formato que Salfa) — se agregó 'ando' a generaAnioCI en el
+// cliente, así que la fila real es [Sucursal, Año, Mes, Residuo, Total KG,
+// Costo Total, Ingreso Total, Neto]. La clave de borrado es Sucursal+Año+Mes
+// para no perder histórico entre años al subir el Excel de un solo mes
+// (reemplaza solo esas filas, no borra la hoja entera).
 function writeCostoIngreso(ss, data) {
   var sheet = ss.getSheetByName('Costo e Ingreso');
   if (!sheet) throw new Error('Hoja "Costo e Ingreso" no encontrada');
@@ -241,12 +244,12 @@ function writeCostoIngreso(ss, data) {
   var lastRow = sheet.getLastRow();
 
   if (data.filas && data.filas.length > 0) {
-    var keys = new Set(data.filas.map(function (f) { return String(f[0]) + '|' + String(f[1]); }));
+    var keys = new Set(data.filas.map(function (f) { return String(f[0]) + '|' + String(f[1]) + '|' + String(f[2]); }));
     if (lastRow >= startRow) {
-      var cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 2).getValues();
+      var cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 3).getValues();
       var toDelete = [];
       cols.forEach(function (r, i) {
-        var key = String(r[0]) + '|' + String(r[1]);
+        var key = String(r[0]) + '|' + String(r[1]) + '|' + String(r[2]);
         if (keys.has(key)) toDelete.push(startRow + i);
       });
       toDelete.reverse().forEach(function (r) { sheet.deleteRow(r); });
@@ -258,6 +261,12 @@ function writeCostoIngreso(ss, data) {
 
 // Lee "Costo e Ingreso" agrupado por sucursal (empresa_id) → mes → residuos[],
 // con totales agregados por mes. Usada solo por el visor standalone.
+//
+// NOTA: la hoja tiene columna Año (col. B), pero esta función sigue
+// agrupando solo por nombre de mes (sin año) — misma limitación que el resto
+// del visor standalone (leerTrazabilidad_/leerValorizacion_/MESES_ACTIVOS
+// tampoco distinguen año todavía). Si se necesita ver varios años acá, hay
+// que revisar esas funciones también, no solo esta.
 function leerCostoIngreso_() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName('Costo e Ingreso');
@@ -267,19 +276,20 @@ function leerCostoIngreso_() {
   var startRow = headerRow + 1;
   var lastRow = sheet.getLastRow();
   if (lastRow < startRow) return {};
-  var rows = sheet.getRange(startRow, 1, lastRow - startRow + 1, 7).getValues();
+  var rows = sheet.getRange(startRow, 1, lastRow - startRow + 1, 8).getValues();
 
   var result = {}; // empId -> mes -> { residuos:[...], totales:{...} }
   rows.forEach(function (r) {
     var suc = String(r[0] || '').trim();
-    var mes = normalizarMes_(r[1]);
-    var residuo = String(r[2] || '').trim();
+    // r[1] = Año (no se usa acá todavía, ver nota arriba)
+    var mes = normalizarMes_(r[2]);
+    var residuo = String(r[3] || '').trim();
     if (!suc || !mes) return;
     var empId = normalizarSucursal_(suc);
-    var totalKg = Number(r[3]) || 0;
-    var costoTotal = Number(r[4]) || 0;
-    var ingresoTotal = Number(r[5]) || 0;
-    var neto = (r[6] !== '' && r[6] !== null && r[6] !== undefined) ? Number(r[6]) : (ingresoTotal - costoTotal);
+    var totalKg = Number(r[4]) || 0;
+    var costoTotal = Number(r[5]) || 0;
+    var ingresoTotal = Number(r[6]) || 0;
+    var neto = (r[7] !== '' && r[7] !== null && r[7] !== undefined) ? Number(r[7]) : (ingresoTotal - costoTotal);
 
     result[empId] = result[empId] || {};
     if (!result[empId][mes]) {
