@@ -2447,6 +2447,24 @@ nueva versión de despliegue para que el guardado funcione (el visor ya está pu
 parte de lectura/edición, pero el guardado va a fallar con un toast de error hasta que se
 redespliegue el backend).
 
+## Vital: la tarjeta de "Valorizar un 2% en peso" no mostraba Real/Acumulado/Meta — 2026-09-03
+El usuario notó que faltaba el comparativo de la meta (2%) contra el acumulado. Causa: el
+backend (`construirEmpresas_()` en `Code-Vital.gs`) normaliza este objetivo a `avance`/`meta`
+en escala 0-100 ("% de la meta ya alcanzado", para que la barra de progreso funcione igual que
+el resto de los objetivos) — eso hacía que la tarjeta mostrara "100%" en vez de los números
+reales ("35% acumulado vs. 2% meta"), con el detalle real solo como texto chico.
+
+Fix (solo en el repo `Visor-de-Objetivos-Vital`, sin tocar el backend): se agregó un caso
+especial en `estadoObjetivosVisibles()` (pantalla) y en la tabla de Objetivos de
+`imprimirInformeCompleto()` (PDF exportado) que detecta el patrón `/valorizar\s+(un\s+)?\d+%/i`
+y recalcula en vivo con el mismo `VAL_DATA`/`getMetaMes` que ya usa `renderValorizacion()` —
+mostrando `avance` = % Acumulado real, `metaNum` = Meta real, y un detalle explícito
+"Real [mes]: X% · Acumulado a [mes]: Y% · Meta: Z%". Verificado con harness de Node.
+
+De paso, en el mismo hilo se hizo el Seguimiento CSE editable (ver sección anterior) — ambos
+cambios fueron sobre el visor standalone de Vital, no sobre el visor principal
+(`valorizacion-recylink.html`).
+
 ## Cómo verificar sintaxis JS del archivo
 El HTML es un solo archivo con `<script>...</script>` embebido. Para validar sintaxis:
 ```bash
