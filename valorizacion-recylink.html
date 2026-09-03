@@ -475,7 +475,7 @@ var EMPRESAS = {
     objetivos: [
       {id:'trazabilidad',    nombre:'100% trazabilidad',                                              tipo:'trazabilidad'},
       {id:'sinader',         nombre:'Cumplimiento normativa SINADER',                                  tipo:'sinader'},
-      {id:'sensibilizacion', nombre:'Generar sensibilización, concientización y cultura ambiental',    tipo:'manual_anual'},
+      {id:'sensibilizacion', nombre:'Generar sensibilización, concientización y cultura ambiental',    tipo:'acompanamiento_anual', cseKey:'charla'},
       {id:'kpi_costo',       nombre:'Incorporar KPI de costo - valorización',                          tipo:'kpi_costo'}
     ]
   },
@@ -557,11 +557,14 @@ var respelSet = {};
 // para calcular FGR (m3 acumulados / m2 construidos) y Ton CO2 evitadas/m2.
 var euroAvance = { m2Totales: {}, pctPorSucMes: {} };
 
-// Datos de la hoja "👥 Seguimiento_CSE" de Euro: SI/NO por Sucursal+Mes para
-// "Correo seguimiento"/"Reunión seguimiento"/"Visita a terreno". Se usa
-// "Visita a terreno" para auto-completar el objetivo "Acompañamiento en
-// terreno, mediante charlas y una auditoría" (SI = 100%, NO = 0%).
-// euroCse[suc][mesKey] = {correo, reunion, visita} (boolean|undefined).
+// Datos de la hoja "👥 Seguimiento_CSE": SI/NO por Sucursal+Mes para
+// "Correo seguimiento"/"Reunión seguimiento"/"Visita a terreno"/"Charlas".
+// Originalmente solo de Euro (de ahí el nombre), pero se lee genéricamente
+// para cualquier empresa cuyo backend incluya "cse" en el dump clásico —
+// también Ando desde 2026-09-03 (usa "Charlas" para auto-completar el
+// objetivo "Generar sensibilización..."). Se usa "Visita a terreno" en Euro
+// para auto-completar "Acompañamiento en terreno..." (SI = 100%, NO = 0%).
+// euroCse[suc][mesKey] = {correo, reunion, visita, charla} (boolean|undefined).
 var euroCse = {};
 function normResiduo(s) {
   return (s+'').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
@@ -2193,14 +2196,19 @@ function calcObjetivos(anio) {
         detalle=partsSeg.join(' · ');
       } else if(obj.tipo==='acompanamiento_anual'){
         // Euro: OK si hubo al menos una "Visita a terreno" (SI) en el año,
-        // detalle lista los meses exactos en que se realizó.
+        // detalle lista los meses exactos en que se realizó. Mismo mecanismo
+        // reutilizado para Ando (2026-09-03, a pedido del usuario: "similar a
+        // lo que se hace en Euro") pero mirando la acción "Charlas" en vez de
+        // "Visita" — la clave a revisar en euroCse queda parametrizada por
+        // obj.cseKey (default 'visita' para no cambiar el comportamiento de Euro).
+        var cseKeyChk=obj.cseKey||'visita';
         var mesesVisita=[];
         Object.keys(euroCse[suc]||{}).sort().forEach(function(mesKey){
           if(anio && mesKey.slice(0,4)!==anio) return;
-          if(euroCse[suc][mesKey].visita===true) mesesVisita.push(MESES_ES[parseInt(mesKey.slice(5))]);
+          if(euroCse[suc][mesKey][cseKeyChk]===true) mesesVisita.push(MESES_ES[parseInt(mesKey.slice(5))]);
         });
         estado=mesesVisita.length>0?'OK':'No';
-        detalle=mesesVisita.length>0?mesesVisita.join(', '):'No se registraron visitas a terreno';
+        detalle=mesesVisita.length>0?mesesVisita.join(', '):'No se registraron '+(cseKeyChk==='charla'?'charlas':'visitas a terreno');
       } else if(obj.tipo==='segregacion_anual'){
         // Correcta segregacion (Salfa, ahora anual): OK si aparece algun
         // residuo que no sea Escombro/Excavacion/Domiciliario en todo el año.
@@ -2660,7 +2668,9 @@ function loadSheetsData(data) {
       var accionLower = accion.toLowerCase();
       var key = accionLower.indexOf('correo') >= 0 ? 'correo'
         : accionLower.indexOf('reun') >= 0 ? 'reunion'
-        : accionLower.indexOf('visita') >= 0 ? 'visita' : null;
+        : accionLower.indexOf('visita') >= 0 ? 'visita'
+        : accionLower.indexOf('charla') >= 0 ? 'charla'
+        : accionLower.indexOf('encuesta') >= 0 ? 'charla' : null; // "Encuesta seguimiento" = texto viejo de Ando antes del rename a "Charlas"
       if (!key) return;
       var anioActual = new Date().getFullYear();
       Object.keys(MESES_ES).forEach(function(idx) {

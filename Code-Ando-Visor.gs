@@ -61,6 +61,7 @@ function doPost(e) {
     else if (tipo === 'objetivos') writeObjetivos(ss, data);
     else if (tipo === 'totalResiduos') writeTotalResiduos(ss, data);
     else if (tipo === 'cse') writeCSE_(ss, data); // NUEVO — Seguimiento CSE editable
+    else if (tipo === 'minutas') writeMinutas_(ss, data); // NUEVO — Visor de Minutas
 
     return ContentService
       .createTextOutput(JSON.stringify({ok: true}))
@@ -203,6 +204,28 @@ function readRespelSheet_() {
   });
 }
 
+// Dump genérico de "👥 Seguimiento_CSE" para la app principal (doGetClasico_),
+// mismo formato que readCseSheet_() en Code-Euro.gs — filas como objetos
+// {empresa_id, Sucursal, "Acción CSE", Enero...Diciembre}. Agregado
+// 2026-09-03, a pedido del usuario: para que calcObjetivos() en la app
+// principal pueda auto-completar "Generar sensibilización..." a partir de la
+// acción "Charlas" (mismo mecanismo ya usado en Euro con "Visita a terreno").
+function readCseSheetClasico_() {
+  var sr;
+  try {
+    sr = getSheetRows_(SHEET_CSE_CANDIDATOS);
+  } catch (err) {
+    return [];
+  }
+  var h = sr.header;
+  var idxSuc = h.indexOf("Sucursal");
+  return sr.rows.filter(function (r) { return idxSuc !== -1 && String(r[idxSuc] || "").trim() !== ""; }).map(function (r) {
+    var obj = {};
+    h.forEach(function (hh, i) { if (hh) obj[hh] = r[i]; });
+    return obj;
+  });
+}
+
 // NUEVO — Seguimiento CSE editable. Guarda in-place (por empresa_id +
 // "Acción CSE") los valores SI/NO por mes que edita el visor; si la fila
 // empresa_id+accion no existe todavía la crea. data.filas viene como
@@ -268,6 +291,8 @@ function writeCSE_(ss, data) {
 // ============================================================
 
 function doGet(e) {
+  const quiereMinutas = e && e.parameter && e.parameter.minutas === '1';
+  if (quiereMinutas) return doGetMinutas_(e);
   const quiereVisor = e && e.parameter && (e.parameter.callback || e.parameter.visor === '1');
   if (quiereVisor) return doGetVisor_(e);
   return doGetClasico_(e);
@@ -294,7 +319,8 @@ function doGetClasico_(e) {
     valorizacion: readSheet('♻️ Valorización') || readSheet('Valorización'),
     trazabilidad: readSheet('📊 Trazabilidad_Docs') || readSheet('Trazabilidad_Docs'),
     objetivos: readSheet('🎯 Objetivos') || readSheet('Objetivos'),
-    respel: readRespelSheet_()
+    respel: readRespelSheet_(),
+    cse: readCseSheetClasico_()
   };
 
   return ContentService
@@ -359,7 +385,8 @@ function buildPayload_() {
   Object.keys(traza.sucursales).forEach(function (empId) { empIdsValidos[empId] = true; });
 
   var cse   = leerCSE_(empIdsValidos);
-  var empresas = construirEmpresas_(traza, val, cse);
+  var objetivosReales = leerObjetivosReales_();
+  var empresas = construirEmpresas_(traza, val, cse, objetivosReales);
   var mesesActivos = calcularMesesActivos_(traza, val, cse);
 
   return {
@@ -536,7 +563,21 @@ function leerCSE_(empIdsValidos) {
 
 // ── Construcción del modelo para el visor ──
 
-function construirEmpresas_(traza, val, cse) {
+// Los 4 objetivos reales de Ando son trazabilidad/sinader/sensibilizacion/
+// kpi_costo (ver EMPRESAS.ando.objetivos en valorizacion-recylink.html) — el
+// texto tiene que coincidir EXACTO con lo que escribe calcObjetivos() en la
+// hoja "🎯 Objetivos" (confirmado con curl 2026-09-03). NO incluyen
+// Valorización, así que (mismo criterio ya aplicado en Salfa) no se agrega
+// una tarjeta sintética de "% Valorización" en objetivos — ese dato sigue
+// disponible aparte en VAL_DATA/renderValorizacion().
+var ANDO_OBJETIVOS_TEXTOS = [
+  "100% trazabilidad",
+  "Cumplimiento normativa SINADER",
+  "Generar sensibilización, concientización y cultura ambiental",
+  "Incorporar KPI de costo - valorización"
+];
+
+function construirEmpresas_(traza, val, cse, objetivosReales) {
   var empresas = [];
 
   Object.keys(traza.sucursales).sort().forEach(function (empId) {
@@ -554,29 +595,12 @@ function construirEmpresas_(traza, val, cse) {
       };
     });
 
-    var objetivos = [{ texto: "100% Trazabilidad" }];
-
-    var valInfo = val[empId] || { meses: {}, meta: {}, acumulado: {} };
-    var mesesValOrdenados = Object.keys(valInfo.meses)
-      .sort(function (a, b) { return MESES.indexOf(a) - MESES.indexOf(b); });
-    var ultimoMesVal = mesesValOrdenados[mesesValOrdenados.length - 1];
-
-    var mesesAcumOrdenados = Object.keys(valInfo.acumulado || {})
-      .sort(function (a, b) { return MESES.indexOf(a) - MESES.indexOf(b); });
-    var ultimoMesAcum = mesesAcumOrdenados[mesesAcumOrdenados.length - 1];
-
-    var avanceVal = ultimoMesAcum !== undefined
-      ? valInfo.acumulado[ultimoMesAcum]
-      : (ultimoMesVal !== undefined ? valInfo.meses[ultimoMesVal] : null);
-
-    var metaVal = (ultimoMesVal !== undefined && valInfo.meta[ultimoMesVal] !== undefined)
-      ? valInfo.meta[ultimoMesVal] : null;
-
-    var textoVal = metaVal !== null ? (metaVal + "% Valorización") : "Meta Valorización (sin definir)";
-    objetivos.push({
-      texto: textoVal,
-      avance: avanceVal,
-      ok: (metaVal !== null && avanceVal !== null) ? (avanceVal >= metaVal) : null
+    var propios = (objetivosReales && objetivosReales[empId]) || {};
+    var objetivos = ANDO_OBJETIVOS_TEXTOS.map(function (texto) {
+      var d = propios[texto];
+      return d
+        ? { texto: texto, avance: d.avance, ok: d.ok, detalle: d.detalle }
+        : { texto: texto, avance: null, ok: null, detalle: "" };
     });
 
     var cseInfo = cse.cseData[empId] || { correo: {}, reunion: {}, encuesta: {}, fechas: {} };
@@ -678,6 +702,168 @@ function letraFromSucursal_(s) {
   var letras = words.slice(0, 2).map(function (w) { return w.charAt(0).toUpperCase(); }).join("");
   if (letras.length < 2 && s && s.length >= 2) letras = s.substring(0, 2).toUpperCase();
   return letras || "??";
+}
+
+// Lee la hoja real "🎯 Objetivos" (empresa_id | Sucursal | Mes | Año |
+// Objetivo | % cumplimiento | Detalle) y devuelve, por sucursal, el
+// objetivo más reciente de cada texto distinto (agregado 2026-09-03, a
+// pedido del usuario: "no se hace seguimiento de los 4 objetivos que se
+// muestran en la hoja objetivos 2026").
+//
+// OJO — el header de esta hoja en Ando quedó mal etiquetado (parece copiado
+// del formato Año-aware sin usarlo realmente): la columna con el TEXTO del
+// objetivo está bajo el header "Año" (no "Objetivo"), y la columna con el
+// ESTADO (fracción 0-1, o "OK"/"No") está bajo el header "Objetivo" (no
+// "% cumplimiento"). Confirmado con curl al deployment real 2026-09-03:
+// writeObjetivos() solo escribe 6 columnas posicionales [empresa_id,
+// Sucursal, Mes, texto, estado, detalle], pero la fila de encabezado real
+// tiene 7 celdas (con un "Año" de más antes de "Objetivo") — así que todo
+// queda corrido una columna respecto a lo que dice el header. Se lee por
+// esos nombres de header tal como están hoy para no tener que pedirle al
+// usuario que edite manualmente la planilla.
+function leerObjetivosReales_() {
+  var sr;
+  try {
+    sr = getSheetRows_(['🎯 Objetivos', 'Objetivos']);
+  } catch (err) {
+    return {};
+  }
+  var h = sr.header;
+  var idxSuc = h.indexOf("Sucursal");
+  var idxMes = h.indexOf("Mes");
+  var idxTexto = h.indexOf("Año");            // ver nota arriba: en realidad es el texto del objetivo
+  var idxEstado = h.indexOf("Objetivo");      // ver nota arriba: en realidad es el estado (0-1 / OK / No)
+  var idxDet = h.indexOf("% cumplimiento");   // ver nota arriba: en realidad es el detalle descriptivo
+
+  var result = {}; // empId -> texto -> { mesIdx, avance, ok, detalle }
+
+  sr.rows.forEach(function (r) {
+    var suc = String(r[idxSuc] || "").trim();
+    var texto = String(r[idxTexto] || "").trim();
+    if (!suc || !texto) return;
+    if (/documentos adicionales/i.test(texto)) return; // fila informativa, no es uno de los 4 objetivos reales
+
+    var empId = normalizarSucursal_(suc);
+    var mes = normalizarMes_(r[idxMes]); // "Anual" no matchea ningún mes y queda tal cual (mesIdx -1)
+    var mesIdx = MESES.indexOf(mes);
+    var rawEstado = idxEstado === -1 ? "" : r[idxEstado];
+    var detalle = idxDet === -1 ? "" : String(r[idxDet] || "").trim();
+    var s = String(rawEstado === null || rawEstado === undefined ? "" : rawEstado).trim();
+
+    var avance = null, ok = null;
+    if (/^(s[ií]|ok)$/i.test(s)) { avance = 100; ok = true; }
+    else if (/^no$/i.test(s)) { avance = 0; ok = false; }
+    else {
+      var n = normalizePercent_(rawEstado);
+      if (n !== null) { avance = n; ok = n >= 100; }
+    }
+
+    result[empId] = result[empId] || {};
+    var prev = result[empId][texto];
+    if (!prev || mesIdx > prev.mesIdx) {
+      result[empId][texto] = { mesIdx: mesIdx, avance: avance, ok: ok, detalle: detalle };
+    }
+  });
+
+  return result;
+}
+
+
+// ============================================================
+// VISOR DE MINUTAS — lectura/escritura de la pestaña "Minuta" (agregado
+// 2026-09-03, a pedido del usuario). Mismo mecanismo genérico ya usado en
+// Code-Vital.gs/Code-Gespania.gs/Code-Salfa.gs: el visor detecta solo los
+// bloques de sesión (fila de título en columna A, resto de A:F vacío) y
+// manda de vuelta headerRow/dataStartRow/colMap junto con los items — el
+// backend no necesita saber la estructura interna de cada minuta.
+// ============================================================
+
+var SHEET_MINUTA_CANDIDATOS = ['Minuta ', 'Minuta', '📝 Minuta'];
+
+function encontrarHojaMinuta_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  for (var i = 0; i < SHEET_MINUTA_CANDIDATOS.length; i++) {
+    var sheet = ss.getSheetByName(SHEET_MINUTA_CANDIDATOS[i]);
+    if (sheet) return sheet;
+  }
+  throw new Error('No se encontró la hoja de Minutas: ' + SHEET_MINUTA_CANDIDATOS.join(' / '));
+}
+
+/**
+ * data.sessions viene del visor con esta forma:
+ * [{ title, headerRow, dataStartRow, colMap:{item,cumplido,comentario,acuerdos,revisado},
+ *    items:[{item, cumplido, comentario, acuerdos, revisado}, ...] }, ...]
+ */
+function writeMinutas_(ss, data) {
+  var sheet = encontrarHojaMinuta_();
+
+  (data.sessions || []).forEach(function (session) {
+    if (!session.headerRow) return; // sesión sin referencia de fila, se omite por seguridad
+    var dataStartRow = session.dataStartRow || (session.headerRow + 1);
+    var colMap = session.colMap || { item:0, cumplido:1, comentario:2, acuerdos:3, revisado:4 };
+
+    var blockEnd = buscarFinBloqueMinuta_(sheet, dataStartRow);
+    var currentSize = blockEnd - dataStartRow;
+    var rows = session.items || [];
+    var neededSize = rows.length;
+
+    if (neededSize > currentSize) {
+      sheet.insertRowsBefore(blockEnd, neededSize - currentSize);
+    }
+
+    for (var i = 0; i < neededSize; i++) {
+      var row = rows[i];
+      var targetRow = dataStartRow + i;
+      sheet.getRange(targetRow, colMap.item + 1).setValue(row.item || '');
+      sheet.getRange(targetRow, colMap.cumplido + 1).setValue(!!row.cumplido);
+      sheet.getRange(targetRow, colMap.comentario + 1).setValue(row.comentario || '');
+      sheet.getRange(targetRow, colMap.acuerdos + 1).setValue(row.acuerdos || '');
+      sheet.getRange(targetRow, colMap.revisado + 1).setValue(!!row.revisado);
+    }
+  });
+}
+
+// El bloque de una sesión termina en la siguiente "fila de título" (columna A
+// con contenido y el resto de columnas A:F vacío) o al llegar al final de la hoja.
+function buscarFinBloqueMinuta_(sheet, fromRow) {
+  var lastRow = sheet.getLastRow();
+  var lastCol = Math.min(Math.max(sheet.getLastColumn(), 5), 6);
+  for (var r = fromRow; r <= lastRow; r++) {
+    var vals = sheet.getRange(r, 1, 1, lastCol).getValues()[0];
+    if (esFilaDeTitulo_(vals)) return r;
+  }
+  return lastRow + 1;
+}
+function esFilaDeTitulo_(vals) {
+  if (vals[0] === '' || vals[0] === null) return false;
+  for (var i = 1; i < vals.length; i++) {
+    if (vals[i] !== '' && vals[i] !== null) return false; // false/0 sí cuentan como "con contenido"
+  }
+  return true;
+}
+
+// Devuelve las filas crudas (A:F) de la pestaña Minuta vía JSONP, para que
+// el visor las parsee con su propia lógica de sesiones.
+function doGetMinutas_(e) {
+  var payload;
+  try {
+    var sheet = encontrarHojaMinuta_();
+    var lastRow = sheet.getLastRow();
+    var lastCol = Math.max(sheet.getLastColumn(), 5);
+    var rows = lastRow > 0 ? sheet.getRange(1, 1, lastRow, lastCol).getValues() : [];
+    payload = { rows: rows };
+  } catch (err) {
+    payload = { error: true, message: String(err) };
+  }
+
+  var callback = e && e.parameter && e.parameter.callback;
+  if (callback) {
+    var js = callback + "(" + JSON.stringify(payload) + ");";
+    return ContentService.createTextOutput(js)
+      .setMimeType(ContentService.MimeType.JAVASCRIPT);
+  }
+  return ContentService.createTextOutput(JSON.stringify(payload))
+    .setMimeType(ContentService.MimeType.JSON);
 }
 
 
