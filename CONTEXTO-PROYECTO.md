@@ -2508,10 +2508,20 @@ Cambios aplicados (mismo alcance que Vital):
   cumplen su meta" — no una tarjeta por sucursal con avance normalizado a 0-100 que esconda los
   números reales) — no se encontró el mismo problema, así que no se tocó.
 
-**Nota encontrada de paso, NO corregida (fuera de lo pedido)**: `writeValorizacion` en
-`Code-Ando-Visor.gs` usa el patrón viejo de borrado (por empresa_id solo, sin mirar "Tipo") —
-mismo tipo de bug de integridad ya corregido en Gespania/Socovesa/Salfa/Euro. Se documenta en
-un comentario en el archivo; no se tocó porque no fue parte de lo pedido.
+**Nota encontrada de paso — luego corregida a pedido del usuario (2026-09-03)**: `writeValorizacion`
+en `Code-Ando-Visor.gs` usaba el patrón viejo de borrado (por `empresa_id` solo, sin mirar
+"Tipo") — mismo tipo de bug de integridad ya corregido en Gespania/Socovesa/Salfa/Euro:
+sincronizar solo "% Real" de un mes nuevo borraba de paso "% Acumulado" y "Meta %" de la misma
+sucursal. El usuario pidió explícitamente el fix ("corrige también el bug de writeValorizacion
+en ANDO"). Corregido a clave `empresa_id+Tipo` (esta hoja de Ando NO tiene columna Año, a
+diferencia de Vital/Euro/Socovesa, así que la clave queda en 2 campos, no 3). Verificado con
+harness de Node: sincronizar una fila con "% Real" nuevo, con "% Acumulado" y "Meta %" ya
+existentes para la misma sucursal, deja las 3 filas intactas (solo se reemplaza "% Real").
+**Pendiente**: el usuario debe repegar `Code-Ando-Visor.gs` en el proyecto de Apps Script
+correcto — el que sirve el `DATA_SOURCE_URL` de `Visor-de-Objetivos-ANDO` (NO el mismo proyecto
+que `Code-Ando.gs`, que sirve la app principal — son dos deployments de Apps Script separados
+para la misma empresa, ver sección "Ando: visor standalone usa un backend separado") — y crear
+una nueva versión de deployment para que el fix tome efecto.
 
 Verificado con harness de Node: `writeCSE_` crea/actualiza sin duplicar, `calcularMesesActivos_`
 corta en el mes correcto en vez de Diciembre. El navegador siguió sin conectar (varios

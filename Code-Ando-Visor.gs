@@ -31,16 +31,16 @@
  *     el Seguimiento CSE clickeable que se agregó en
  *     Visor-de-Objetivos-ANDO/index.html pueda guardar.
  *
- * NOTA (encontrada de paso, NO corregida — fuera del alcance pedido):
- * writeValorizacion/writeTrazabilidad/writeObjetivos acá usan el patrón
- * VIEJO de borrado (por empresa_id solo, o empresa_id+Mes) — el mismo tipo
- * de bug de integridad de datos ya encontrado y corregido en varias otras
- * empresas este proyecto (ver CONTEXTO-PROYECTO.md, sección de Gespania/
- * Socovesa/Salfa/Euro: "bugs de clave de borrado"). writeValorizacion en
- * particular borra TODA fila que coincida con el empresa_id, sin mirar
- * "Tipo" — sincronizar cualquier cosa podría borrar "% Real"/"%
- * Acumulado"/"Meta %" juntos. No se tocó porque no fue parte de lo pedido,
- * pero conviene aplicarle el mismo fix si se confirma el problema.
+ *  3) FIX writeValorizacion (2026-09-03, a pedido del usuario): borraba TODA
+ *     fila que coincidiera con el empresa_id, sin mirar "Tipo" — sincronizar
+ *     cualquier cosa (ej. solo "% Real" de un mes nuevo) borraba de paso
+ *     "% Acumulado" y "Meta %" de la misma sucursal. Mismo tipo de bug de
+ *     integridad ya encontrado y corregido en Code-Gespania.gs/
+ *     Code-Socovesa.gs/Code-Salfa.gs/Code-Euro.gs (ver CONTEXTO-PROYECTO.md,
+ *     "bugs de clave de borrado"). Se corrigió a empresa_id+Tipo (ANDO no
+ *     tiene columna Año en esta hoja, así que no hace falta en la clave).
+ *     writeTrazabilidad/writeObjetivos NO tenían este problema — ya borraban
+ *     por empresa_id+Mes, no por empresa_id solo.
  * ============================================================
  */
 
@@ -72,16 +72,23 @@ function doPost(e) {
   }
 }
 
+// FIX (2026-09-03, a pedido del usuario): antes borraba TODA fila que
+// coincidiera con el empresa_id, sin mirar "Tipo" — sincronizar cualquier
+// cosa (ej. solo "% Real" de un mes nuevo) borraba de paso "% Acumulado" y
+// "Meta %" de la misma sucursal, aunque no vinieran en data.filas. Mismo
+// tipo de bug ya encontrado y corregido en Code-Gespania.gs/
+// Code-Socovesa.gs/Code-Salfa.gs/Code-Euro.gs. ANDO no tiene columna Año en
+// esta hoja, así que la clave queda en empresa_id+Tipo (sin Año).
 function writeValorizacion(ss, data) {
   const sheet = ss.getSheetByName('♻️ Valorización') || ss.getSheetByName('Valorización');
   if (!sheet) throw new Error('Hoja Valorización no encontrada');
   const startRow = 6;
   const lastRow = sheet.getLastRow();
   if (lastRow >= startRow) {
-    const col = sheet.getRange(startRow, 1, lastRow - startRow + 1, 1).getValues();
-    const ids = new Set(data.filas.map(f => f[0]));
+    const cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 3).getValues();
+    const keys = new Set(data.filas.map(f => f[0] + '|' + f[2]));
     const toDelete = [];
-    col.forEach((r, i) => { if (ids.has(r[0])) toDelete.push(startRow + i); });
+    cols.forEach((r, i) => { if (keys.has(r[0] + '|' + r[2])) toDelete.push(startRow + i); });
     toDelete.reverse().forEach(r => sheet.deleteRow(r));
   }
   const insertRow = sheet.getLastRow() + 1;
