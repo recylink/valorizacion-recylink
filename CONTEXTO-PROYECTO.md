@@ -2465,6 +2465,22 @@ De paso, en el mismo hilo se hizo el Seguimiento CSE editable (ver sección ante
 cambios fueron sobre el visor standalone de Vital, no sobre el visor principal
 (`valorizacion-recylink.html`).
 
+## Vital: botón "Editar metas" en el visor principal — 2026-09-03
+El usuario pidió el mismo botón "Editar metas" que ya tienen Copec/Acciona/Gespania en
+`valorizacion-recylink.html` (edita la meta de valorización desde un modal en la app, en vez de
+solo editando la fila "Meta %" directo en el Sheet). Se agregó siguiendo exactamente el patrón
+de Gespania: `VITAL_META_PCT_DEFAULT = 2` (el objetivo real de Vital), `getVitalMetasDefault()`/
+`getVitalMetas()`/`saveVitalMetas()` (localStorage `vital_metas`, mezclado con
+`metasFromSheets` como base), conectado en `getMetasEditablesActuales()`/
+`saveMetasEditablesActuales()`/`metaDefaultEditable()` y los 3 lugares que controlan la
+visibilidad del botón `btn-editar-metas`. Se sacó `vital` del grupo `metasFromSheets` en
+`metasActuales`/`metas` (autoSync/renderCopecObjetivos) para que apunte a `getVitalMetas()` en
+su lugar — mismo tratamiento que Gespania recibió en su momento.
+
+**Nota**: no se pudo verificar en vivo en el navegador por inestabilidad persistente de la
+herramienta esta sesión (varios intentos fallidos) — el cambio se verificó por sintaxis
+(`node --check`) y revisión estática, calcado 1:1 del patrón ya probado de Gespania.
+
 ## Cómo verificar sintaxis JS del archivo
 El HTML es un solo archivo con `<script>...</script>` embebido. Para validar sintaxis:
 ```bash
