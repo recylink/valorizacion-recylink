@@ -2396,6 +2396,23 @@ en vez de llegar a Diciembre.
 **Importante**: hay que volver a pegar cada `Code-*.gs` en su respectivo editor de Apps Script
 y crear una nueva versión de despliegue para que el fix tome efecto en cada visor.
 
+### FIX 2 (mismo día): también había que sacar "% Acumulado" del escaneo
+El usuario redesplegó Vital y seguía mostrando Diciembre. Se pidió el payload en vivo por curl
+y se vio la causa real: `VAL_DATA.obra_vallenar.acumulado` tenía valores para Junio, Julio,
+Agosto... hasta Diciembre (todos en 0%), aunque `meses` (% Real) solo tenía Junio y Julio.
+
+"% Acumulado" es acumulativo por diseño (`getAcum()` en el cliente): `autoSync()` recorre los
+12 meses del año y llama `getAcum(suc, mKey)` para cada uno — una vez que hay actividad en
+algún mes, el acumulado sigue siendo un valor válido (no null) para todos los meses
+posteriores aunque esos meses puntuales no tengan nada nuevo (el acumulado "se arrastra"). Por
+eso incluir `acumulado` en el escaneo tenía el mismo efecto que incluir `meta`.
+
+Se sacó `scan(val[emp].acumulado)` de los 4 archivos, dejando el escaneo de Valorización SOLO
+en `val[emp].meses` (% Real vía `getPct()`, que es null si no hay `valMatrix` para ESE mes
+exacto — es la única fila que refleja de verdad "hubo actividad este mes"). Verificado con
+harness de Node replicando el patrón real (Meta%/Acumulado rellenos hasta diciembre, % Real
+solo en Junio/Julio): `MESES_ACTIVOS` ahora corta correctamente en `["Enero", ..., "Julio"]`.
+
 ## Cómo verificar sintaxis JS del archivo
 El HTML es un solo archivo con `<script>...</script>` embebido. Para validar sintaxis:
 ```bash
