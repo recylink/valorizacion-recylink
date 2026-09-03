@@ -62,6 +62,7 @@ function doPost(e) {
     else if (tipo === 'totalResiduos') writeTotalResiduos(ss, data);
     else if (tipo === 'cse') writeCSE_(ss, data); // NUEVO — Seguimiento CSE editable
     else if (tipo === 'minutas') writeMinutas_(ss, data); // NUEVO — Visor de Minutas
+    else if (tipo === 'costoIngreso') writeCostoIngreso(ss, data); // NUEVO — Visor Costo-Ingreso
 
     return ContentService
       .createTextOutput(JSON.stringify({ok: true}))
@@ -218,6 +219,79 @@ function writeTotalResiduos(ss, data) {
   if (data.filas && data.filas.length > 0) {
     sheet.getRange(startRow, 1, data.filas.length, data.filas[0].length).setValues(data.filas);
   }
+}
+
+// ── Costo e Ingreso por residuo (agregado 2026-09-03, a pedido del usuario:
+// "añadir el visor costo e ingreso") ──
+//
+// El cliente ya mandaba tipo:'costoIngreso' desde hace tiempo (ver autoSync()
+// en valorizacion-recylink.html, filasCostoIngreso), pero doPost no tenía
+// ningún caso para ese tipo — los datos se perdían en silencio en cada sync.
+// Fila: [Sucursal, Mes, Residuo, Total KG, Costo Total, Ingreso Total, Neto]
+// — SIN columna Año (a diferencia de Salfa, que sí la agregó) porque el
+// cliente hoy no la manda para Ando (generaAnioCI solo es true para salfa).
+// Reemplaza solo las filas cuya Sucursal+Mes coincide con lo que llega
+// (no borra la hoja entera, a diferencia de writeTotalResiduos de arriba).
+function writeCostoIngreso(ss, data) {
+  var sheet = ss.getSheetByName('Costo e Ingreso');
+  if (!sheet) throw new Error('Hoja "Costo e Ingreso" no encontrada');
+  var headerRow = buscarFilaEncabezado_(sheet, 'Sucursal');
+  if (!headerRow) throw new Error('No se encontró la fila de encabezado ("Sucursal") en Costo e Ingreso');
+  var startRow = headerRow + 1;
+  var lastRow = sheet.getLastRow();
+
+  if (data.filas && data.filas.length > 0) {
+    var keys = new Set(data.filas.map(function (f) { return String(f[0]) + '|' + String(f[1]); }));
+    if (lastRow >= startRow) {
+      var cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 2).getValues();
+      var toDelete = [];
+      cols.forEach(function (r, i) {
+        var key = String(r[0]) + '|' + String(r[1]);
+        if (keys.has(key)) toDelete.push(startRow + i);
+      });
+      toDelete.reverse().forEach(function (r) { sheet.deleteRow(r); });
+    }
+    var insertRow = sheet.getLastRow() + 1;
+    sheet.getRange(insertRow, 1, data.filas.length, data.filas[0].length).setValues(data.filas);
+  }
+}
+
+// Lee "Costo e Ingreso" agrupado por sucursal (empresa_id) → mes → residuos[],
+// con totales agregados por mes. Usada solo por el visor standalone.
+function leerCostoIngreso_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Costo e Ingreso');
+  if (!sheet) return {};
+  var headerRow = buscarFilaEncabezado_(sheet, 'Sucursal');
+  if (!headerRow) return {};
+  var startRow = headerRow + 1;
+  var lastRow = sheet.getLastRow();
+  if (lastRow < startRow) return {};
+  var rows = sheet.getRange(startRow, 1, lastRow - startRow + 1, 7).getValues();
+
+  var result = {}; // empId -> mes -> { residuos:[...], totales:{...} }
+  rows.forEach(function (r) {
+    var suc = String(r[0] || '').trim();
+    var mes = normalizarMes_(r[1]);
+    var residuo = String(r[2] || '').trim();
+    if (!suc || !mes) return;
+    var empId = normalizarSucursal_(suc);
+    var totalKg = Number(r[3]) || 0;
+    var costoTotal = Number(r[4]) || 0;
+    var ingresoTotal = Number(r[5]) || 0;
+    var neto = (r[6] !== '' && r[6] !== null && r[6] !== undefined) ? Number(r[6]) : (ingresoTotal - costoTotal);
+
+    result[empId] = result[empId] || {};
+    if (!result[empId][mes]) {
+      result[empId][mes] = { residuos: [], totales: { totalKg: 0, costoTotal: 0, ingresoTotal: 0, neto: 0 } };
+    }
+    result[empId][mes].residuos.push({ residuo: residuo, totalKg: totalKg, costoTotal: costoTotal, ingresoTotal: ingresoTotal, neto: neto });
+    result[empId][mes].totales.totalKg += totalKg;
+    result[empId][mes].totales.costoTotal += costoTotal;
+    result[empId][mes].totales.ingresoTotal += ingresoTotal;
+    result[empId][mes].totales.neto += neto;
+  });
+  return result;
 }
 
 function readRespelSheet_() {
@@ -420,7 +494,9 @@ function buildPayload_() {
 
   var cse   = leerCSE_(empIdsValidos);
   var objetivosReales = leerObjetivosReales_();
+  var costoIngreso = leerCostoIngreso_();
   var empresas = construirEmpresas_(traza, val, cse, objetivosReales);
+  empresas.forEach(function (e) { e.costoIngreso = costoIngreso[e.id] || {}; });
   var mesesActivos = calcularMesesActivos_(traza, val, cse);
 
   return {
