@@ -432,6 +432,37 @@ var EMPRESAS = {
       {id:'fgr',          nombre:'Obtener el FGR al finalizar cada proyecto', tipo:'manual_anual'}
     ]
   },
+  vital: {
+    nombre: 'Constructora Vital',
+    // PENDIENTE: pegar aquí la URL del deployment una vez creado
+    // (Implementar → Nueva implementación → tipo "Aplicación web") de
+    // Code-Vital.gs en el Sheet de Vital.
+    scriptUrl: 'PENDIENTE_DEPLOYMENT_URL',
+    prefix: 'vital',
+    // Sheet armado desde la plantilla nueva (2026-09-03), ya con columna Año
+    // en Trazabilidad_Docs/Valorización/Objetivos/Total Residuos — mismo
+    // formato que Euro/Gespania (ver EMPRESAS_OBJ_CON_ANIO/EMPRESAS_VAL_CON_ANIO
+    // y esVitalTraz en autoSync()).
+    trazCols: [
+      {header:'Sucursal',key:'suc'},{header:'Mes',key:'mes'},{header:'Residuo',key:'residuo'},
+      {header:'Cod. LER',key:'ler'},{header:'Imp.',key:'imp'},{header:'Cert. trat.',key:'cert'},
+      {header:'Factura',key:'factura'},{header:'Cert. decl.',key:'decl'},
+      {header:'Transportista',key:'transp'},{header:'Disp. final',key:'disp'}
+    ],
+    trazDocsCompletos: ['transp','disp'],
+    trazDocsInfo: ['cert','factura','decl'],
+    // "Valorizar un 2% en peso" no está en esta lista a propósito: se
+    // registra vía la hoja ♻️ Valorización (Meta %/% Real/% Acumulado),
+    // igual que en el resto de las empresas — no es un "objetivo" aparte
+    // en 🎯 Objetivos. Los otros 4 objetivos de Vital (ver "Objetivos
+    // 2026" en su Sheet) sí necesitan cálculo automático:
+    objetivos: [
+      {id:'trazabilidad', nombre:'100% trazabilidad', tipo:'trazabilidad'},
+      {id:'segregacion',  nombre:'Segregar al menos 3 residuos (escombro, cartón y madera)', residuos:['Escombro','Cartón','Madera'], tipo:'segregar_especificos'},
+      {id:'sinader',      nombre:'Cumplir normativa vigente sobre declaraciones', tipo:'sinader'},
+      {id:'ecosistema',   nombre:'Conseguir ecosistema dentro del marco legal', tipo:'manual_anual'}
+    ]
+  },
   ando: {
     nombre: 'Ando',
     scriptUrl: 'https://script.google.com/macros/s/AKfycbxDXNb5jL5CsJDEUy71c8fARsoXB3ZzuEBs4Z9zEa7ZQhLBgvuDcWmUNAOa_VIxdTg/exec',
@@ -544,7 +575,7 @@ function isRespel(residuo) {
   return key.indexOf('respel') >= 0;
 }
 var DOC_LABELS = {cert:'cert. tratamiento',factura:'factura',decl:'cert. declaracion',transp:'transportista',disp:'disposicion final'};
-var OBJ_ANUALES = {valorizar_residuo:1,reg_valorizar:1,respel:1,valorizar_especificos:1,acompanamiento_anual:1,manual_anual:1,segregacion_anual:1};
+var OBJ_ANUALES = {valorizar_residuo:1,reg_valorizar:1,respel:1,valorizar_especificos:1,acompanamiento_anual:1,manual_anual:1,segregacion_anual:1,segregar_especificos:1};
 // Nombre "virtual" para poder dormir por sucursal el aporte de % valorizacion
 // vs. meta al calculo de salud — no es un objetivo real de emp.objetivos (no
 // tiene fila propia en la tabla), pero se trata igual para efectos de
@@ -559,12 +590,12 @@ var META_VAL_OBJ_NOMBRE = '% Valorización vs. meta';
 // Socovesa, a pedido del usuario) — cualquier fila de objetivos que el
 // visor sincronice para estas empresas debe incluir el Año o queda todo
 // corrido una columna.
-var EMPRESAS_OBJ_CON_ANIO = {euro:1, socovesa:1, gespania:1};
+var EMPRESAS_OBJ_CON_ANIO = {euro:1, socovesa:1, gespania:1, vital:1};
 // Mismo caso para la hoja "♻️ Valorización": Euro, Socovesa y (desde
 // 2026-08-31) Gespania tienen una columna Año agregada (empresa_id,
 // Sucursal, Tipo, Año, ene%, feb%, ...) en vez del formato original sin
 // Año — ver Code-Socovesa.gs FIX 3.
-var EMPRESAS_VAL_CON_ANIO = {euro:1, socovesa:1, gespania:1};
+var EMPRESAS_VAL_CON_ANIO = {euro:1, socovesa:1, gespania:1, vital:1};
 
 var ABASTIBLE_METAS = {
   'Planta Concón': 15,
@@ -1344,7 +1375,8 @@ function processData(rows, fname) {
   var esCcu = empresaActual === 'ccu';
   var esAcciona = empresaActual === 'acciona';
   var esSocovesa = empresaActual === 'socovesa';
-  var generaTotalResiduos = esCopec || esAbastible || esGespania || esSalfa || esEuro || esAndo || esPms || esCcu || esAcciona || esSocovesa;
+  var esVital = empresaActual === 'vital';
+  var generaTotalResiduos = esCopec || esAbastible || esGespania || esSalfa || esEuro || esAndo || esPms || esCcu || esAcciona || esSocovesa || esVital;
   // Costo e Ingreso por residuo: solo para empresas que tienen el objetivo
   // "KPI costo e ingreso" (tipo 'kpi_costo') — hoy Abastible, Salfa, Ando y CCU.
   // Se deriva de emp.objetivos en vez de hardcodear la lista de empresas para
@@ -1506,7 +1538,7 @@ function autoSync(rows) {
   var emp = EMPRESAS[empresaActual];
 
   // Preparar payload valorización
-  var metasActuales = empresaActual === 'copec' ? getCopecMetas() : empresaActual === 'acciona' ? getAccionaMetas() : empresaActual === 'gespania' ? getGespaniaMetas() : empresaActual === 'abastible' ? ABASTIBLE_METAS : empresaActual === 'pms' ? getPmsMetas() : empresaActual === 'ccu' ? CCU_METAS : (empresaActual === 'salfa' || empresaActual === 'euro' || empresaActual === 'ando') ? metasFromSheets : {};
+  var metasActuales = empresaActual === 'copec' ? getCopecMetas() : empresaActual === 'acciona' ? getAccionaMetas() : empresaActual === 'gespania' ? getGespaniaMetas() : empresaActual === 'abastible' ? ABASTIBLE_METAS : empresaActual === 'pms' ? getPmsMetas() : empresaActual === 'ccu' ? CCU_METAS : (empresaActual === 'salfa' || empresaActual === 'euro' || empresaActual === 'ando' || empresaActual === 'vital') ? metasFromSheets : {};
   var filasVal = [];
   // Euro y Socovesa: fila por Tipo POR AÑO (columna Año agregada a mano en la
   // hoja, con meses fijos Ene-Dic) en vez de un encabezado con un mes-año por
@@ -1557,9 +1589,9 @@ function autoSync(rows) {
   // la misma columna el 2026-09-01 (para no perder historico entre años en un mismo Excel de un
   // solo mes) — mismo lugar que Euro/Socovesa/Gespania: columna B, entre Sucursal y Mes.
   var filasTotalResiduos = [];
-  if (empresaActual === 'copec' || empresaActual === 'abastible' || empresaActual === 'gespania' || empresaActual === 'salfa' || empresaActual === 'euro' || empresaActual === 'ando' || empresaActual === 'pms' || empresaActual === 'ccu' || empresaActual === 'acciona' || empresaActual === 'socovesa') {
-    var generaAnioTR = empresaActual === 'euro' || empresaActual === 'socovesa' || empresaActual === 'gespania' || empresaActual === 'salfa';
-    var generaCO2TR = empresaActual === 'copec' || empresaActual === 'abastible' || empresaActual === 'gespania' || empresaActual === 'salfa' || empresaActual === 'euro' || empresaActual === 'socovesa';
+  if (empresaActual === 'copec' || empresaActual === 'abastible' || empresaActual === 'gespania' || empresaActual === 'salfa' || empresaActual === 'euro' || empresaActual === 'ando' || empresaActual === 'pms' || empresaActual === 'ccu' || empresaActual === 'acciona' || empresaActual === 'socovesa' || empresaActual === 'vital') {
+    var generaAnioTR = empresaActual === 'euro' || empresaActual === 'socovesa' || empresaActual === 'gespania' || empresaActual === 'salfa' || empresaActual === 'vital';
+    var generaCO2TR = empresaActual === 'copec' || empresaActual === 'abastible' || empresaActual === 'gespania' || empresaActual === 'salfa' || empresaActual === 'euro' || empresaActual === 'socovesa' || empresaActual === 'vital';
     filasTotalResiduos = totalResiduosRows.map(function(r){
       var row = [r.suc];
       if (generaAnioTR) row.push(r.mes.slice(0,4));
@@ -1624,8 +1656,14 @@ function autoSync(rows) {
   // final) — a diferencia de Socovesa, que no tiene "Factura" y tiene otro
   // orden. Por eso comparte la misma rama que Euro en vez de la de Socovesa.
   var esGespaniaTraz = empresaActual === 'gespania';
+  // Vital ya nace con la columna Año (Sheet armado desde la plantilla nueva,
+  // 2026-09-03) con el mismo orden que Euro/Gespania (confirmado leyendo el
+  // Sheet real: Sucursal, Mes, Año, Residuo, Código LER, Importaciones,
+  // Cert. tratamiento, Factura, Cert. declaración, Transportista,
+  // Disposición final, Comentario por sucursal).
+  var esVitalTraz = empresaActual === 'vital';
   var filasTraz = trazRows.map(function(r){
-    if (esEuroTraz || esGespaniaTraz) {
+    if (esEuroTraz || esGespaniaTraz || esVitalTraz) {
       return [sucId(r.suc), r.suc, MESES_ES[parseInt(r.mes.slice(5))], r.mes.slice(0,4), r.residuo, r.ler, r.imp, r.cert, r.factura, r.decl, r.transp, r.disp];
     }
     if (esSocovesaTraz) {
@@ -2116,6 +2154,24 @@ function calcObjetivos(anio) {
         if(logrados.length>0)partsV.push('<span style="color:var(--green)">✓ '+logrados.join(', ')+'</span>');
         if(faltantes.length>0)partsV.push('Falta: '+faltantes.join(', '));
         detalle=partsV.join(' · ');
+      } else if(obj.tipo==='segregar_especificos'){
+        // Igual que 'valorizar_especificos' pero por PRESENCIA del residuo
+        // (que se haya registrado ese residuo, sin importar si además se
+        // valorizó) — para objetivos de "segregar" en vez de "valorizar"
+        // (ej. Vital: Escombro+Cartón+Madera).
+        var reqsSeg=obj.residuos||[];
+        var logradosSeg=[],faltantesSeg=[];
+        reqsSeg.forEach(function(resReq){
+          var keyReq=normResiduo(resReq);
+          var tiene=rowsSuc.some(function(r){return normResiduo(r['Residuo'])===keyReq;});
+          if(tiene)logradosSeg.push(resReq);else faltantesSeg.push(resReq);
+        });
+        var pctSeg=reqsSeg.length>0?(logradosSeg.length/reqsSeg.length*100):0;
+        estado=fmtPct(pctSeg);
+        var partsSeg=[];
+        if(logradosSeg.length>0)partsSeg.push('<span style="color:var(--green)">✓ '+logradosSeg.join(', ')+'</span>');
+        if(faltantesSeg.length>0)partsSeg.push('Falta: '+faltantesSeg.join(', '));
+        detalle=partsSeg.join(' · ');
       } else if(obj.tipo==='acompanamiento_anual'){
         // Euro: OK si hubo al menos una "Visita a terreno" (SI) en el año,
         // detalle lista los meses exactos en que se realizó.
@@ -2905,7 +2961,7 @@ function renderCopecObjetivos() {
   var grid = document.getElementById('obj-grid');
   grid.innerHTML = '';
   var emp = EMPRESAS[empresaActual];
-  var metas = empresaActual === 'copec' ? getCopecMetas() : (empresaActual === 'acciona' ? getAccionaMetas() : (empresaActual === 'gespania' ? getGespaniaMetas() : (empresaActual === 'abastible' ? ABASTIBLE_METAS : (empresaActual === 'pms' ? getPmsMetas() : (empresaActual === 'ccu' ? CCU_METAS : ((empresaActual === 'salfa' || empresaActual === 'euro' || empresaActual === 'ando') ? metasFromSheets : {}))))));
+  var metas = empresaActual === 'copec' ? getCopecMetas() : (empresaActual === 'acciona' ? getAccionaMetas() : (empresaActual === 'gespania' ? getGespaniaMetas() : (empresaActual === 'abastible' ? ABASTIBLE_METAS : (empresaActual === 'pms' ? getPmsMetas() : (empresaActual === 'ccu' ? CCU_METAS : ((empresaActual === 'salfa' || empresaActual === 'euro' || empresaActual === 'ando' || empresaActual === 'vital') ? metasFromSheets : {}))))));
   // "Todas" = solo las sucursales con datos en el año elegido (fA), no
   // todas las sucursales de siempre — a pedido del usuario.
   var sucsToShow = fS === 'all' ? sucursalesConDatosEnAnio(fA) : [fS];

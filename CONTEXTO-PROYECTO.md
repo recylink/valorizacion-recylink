@@ -2309,6 +2309,74 @@ una fila con `% cumplimiento="OK"` y `Detalle="Madera"` ahora devuelve `avance:1
 **Importante**: hay que volver a pegar `Code-Salfa.gs` en el editor de Apps Script de Salfa y
 crear una nueva versión de despliegue.
 
+## Nueva empresa: Constructora Vital — 2026-09-03
+Onboarding completo de una empresa nueva (Sheet
+`1vcMZghsL3cpfIlnON4F7vszgwAq1g0LICE4-467WeQ8`, sucursal inicial "Obra Vallenar"), sin Apps
+Script previo. El Sheet se armó desde una plantilla "moderna" (distinta a como se hicieron
+Euro/Salfa/Gespania originalmente): ya trae de fábrica la columna Año en Trazabilidad_Docs/
+Valorización/Objetivos/Total Residuos, más pestañas "Objetivos 2026" (lista maestra de textos
+de objetivo) y "Minuta" — mismo formato que ya tenía Gespania después de sus fixes, así que
+`Code-Vital.gs` se armó directamente a partir de `Code-Gespania.gs` (Año-aware desde el día 1,
+sin arrastrar los bugs que hubo que descubrir y corregir ahí).
+
+Se leyó el Sheet completo vía Google Drive (`download_file_content` como .xlsx + `openpyxl`,
+no solo el resumen de `read_file_content`) para ver los nombres exactos de pestañas y headers
+sin adivinar.
+
+**Objetivos reales de Vital** (pestaña "Objetivos 2026"): 100% trazabilidad · Segregar al menos
+3 residuos (escombro, cartón y madera) · Valorizar un 2% en peso · Cumplir normativa vigente
+sobre declaraciones · Conseguir ecosistema dentro del marco legal.
+
+- "Valorizar un 2% en peso" NO se agregó como objetivo aparte en `EMPRESAS.vital.objetivos` —
+  se mide vía la hoja ♻️ Valorización (Meta %/% Real/% Acumulado), igual que el resto de las
+  empresas; el backend lo muestra como tarjeta en el visor standalone reconociendo el patrón
+  "valorizar (un) N%" en el texto maestro (`esObjetivoValorizacionPct_`).
+- "Cumplir normativa vigente sobre declaraciones" → `tipo:'sinader'` (confirmado con el
+  usuario).
+- "Conseguir ecosistema dentro del marco legal" → `tipo:'manual_anual'` (se ingresa a mano en
+  la fila "Anual" de 🎯 Objetivos, como el resto de los objetivos cualitativos de otras
+  empresas).
+- **"Segregar al menos 3 residuos (escombro, cartón y madera)"**: no había ningún tipo
+  existente que calzara (confirmado con el usuario: x/3 por presencia del residuo, no por
+  valorización). Se agregó un tipo nuevo **`segregar_especificos`** en
+  `valorizacion-recylink.html` (`calcObjetivos()`), calcado de `valorizar_especificos` pero
+  chequeando que el residuo simplemente APAREZCA en Trazabilidad (`rowsSuc.some(r =>
+  normResiduo(r['Residuo'])===keyReq)`) en vez de exigir `isValorizado(...)`. Probado en vivo:
+  con Escombro+Cartón registrados (falta Madera) da 66,7% y detalle "✓ Escombro, Cartón · Falta:
+  Madera".
+
+**Cliente** (`valorizacion-recylink.html`): se agregó `EMPRESAS.vital` (mismo `trazCols` que
+Euro/Salfa, sin Costo e Ingreso ni CSE-hardcodeado) y se registró `vital` en:
+`EMPRESAS_OBJ_CON_ANIO`, `EMPRESAS_VAL_CON_ANIO`, `esVitalTraz` (comparte la rama de
+Trazabilidad_Docs de Euro/Gespania — mismo orden de columnas confirmado leyendo el Sheet real),
+`generaTotalResiduos`/`generaAnioTR`/`generaCO2TR`, y el grupo `metasFromSheets` (junto a
+Salfa/Euro/Ando — Vital no tiene un editor de metas propio, se edita directo en el Sheet).
+
+**Backend** (`Code-Vital.gs`, archivo nuevo): doPost/doGet clásico (usado por
+valorizacion-recylink.html) + visor standalone (`?visor=1`/`?callback=X`, con `?anio=` opcional
+y FGR comparativo) + Minutas (`?minutas=1`) — los 3 fusionados desde el inicio, sin necesidad
+de agregarlos después. Verificado con harness de Node (mock de `SpreadsheetApp`): `doGet` sin
+parámetros devuelve el dump clásico completo (incluye `totalResiduos`); `?visor=1` arma
+`EMPRESAS`/`VAL_DATA`/`ANIOS_DISPONIBLES` correctamente, con la tarjeta de "Valorizar un 2% en
+peso" mostrando el % real acumulado vs. la meta.
+
+**Pendiente, requiere acción del usuario**:
+1. **Desplegar `Code-Vital.gs`**: pegarlo en el editor de Apps Script del Sheet de Vital →
+   Implementar → Nueva implementación → tipo "Aplicación web" → copiar la URL del deployment.
+2. **Pegar esa URL** en `EMPRESAS.vital.scriptUrl` de `valorizacion-recylink.html` (hoy tiene el
+   placeholder `'PENDIENTE_DEPLOYMENT_URL'`).
+3. **Typo en "Objetivos 2026"**: la celda dice "Conseguir ecosostema dentro del marco legal"
+   (con typo) — el código usa "ecosistema" (sin typo) en `EMPRESAS.vital.objetivos`. Como el
+   visor standalone matchea el texto real de 🎯 Objetivos contra el texto de "Objetivos 2026"
+   de forma exacta (case-insensitive), esta diferencia hace que esa tarjeta específica quede
+   siempre en "sin dato" en el visor standalone (el objetivo igual se calcula y sincroniza bien
+   en el visor principal, solo el standalone no lo empareja). Corregir el typo en el Sheet para
+   que coincida.
+4. **Limpiar "Config_Flat"**: sigue teniendo las filas de ejemplo de otras empresas (Gespania,
+   ANDO, CTEC, Novatec, Obra Limpia) — el usuario confirmó que son restos de la plantilla y
+   quiere dejar solo la fila de Vital/Obra Vallenar. Ningún `Code-*.gs` lee esta pestaña (es
+   solo referencia humana), así que no bloquea nada funcionalmente, pero conviene limpiarla.
+
 ## Cómo verificar sintaxis JS del archivo
 El HTML es un solo archivo con `<script>...</script>` embebido. Para validar sintaxis:
 ```bash
