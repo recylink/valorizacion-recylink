@@ -52,6 +52,7 @@ function doPost(e) {
     else if (tipo === 'objetivos') writeObjetivos(ss, data);
     else if (tipo === 'totalResiduos') writeTotalResiduos(ss, data);
     else if (tipo === 'minutas') writeMinutas_(ss, data);
+    else if (tipo === 'cse') writeCSE_(ss, data);
 
     return ContentService
       .createTextOutput(JSON.stringify({ok: true}))
@@ -582,6 +583,65 @@ function leerValorizacion_(targetAnio) {
   });
 
   return valData;
+}
+
+// Guarda in-place (por empresa_id + "Acción CSE", igual criterio que
+// writeValorizacion con Sucursal+Tipo+Año) los valores SI/NO por mes que
+// edita el visor standalone desde el Seguimiento CSE clickeable; si la fila
+// empresa_id+acción no existe todavía la crea. data.filas viene como
+// [{empresaId, sucursal, accion, valores:{Mes:"SI"/"NO"/""}}, ...] — el
+// texto de "accion" tiene que coincidir EXACTO con lo que espera
+// leerCSE_()/mapAccion más abajo ("Correo seguimiento"/"Reunión
+// seguimiento"/"Encuesta seguimiento").
+function writeCSE_(ss, data) {
+  var sheet = ss.getSheetByName('👥 Seguimiento_CSE') || ss.getSheetByName('Seguimiento_CSE');
+  if (!sheet) throw new Error('Hoja "Seguimiento_CSE" no encontrada');
+  var headerRow = buscarFilaEncabezado_(sheet, 'empresa_id');
+  if (!headerRow) throw new Error('No se encontró la fila de encabezado ("empresa_id") en Seguimiento_CSE');
+  var startRow = headerRow + 1;
+  var lastCol = sheet.getLastColumn();
+  var headers = sheet.getRange(headerRow, 1, 1, lastCol).getValues()[0];
+
+  var idx = {};
+  headers.forEach(function (h, i) { if (h) idx[String(h).trim()] = i + 1; });
+  var colEmpresa = idx['empresa_id'];
+  var colAccion = idx['Acción CSE'] || idx['Accion CSE'];
+  var colSucursal = idx['Sucursal'];
+  if (!colEmpresa || !colAccion) throw new Error('Encabezados "empresa_id"/"Acción CSE" no encontrados en Seguimiento_CSE');
+
+  var colByMes = {};
+  headers.forEach(function (h, i) {
+    var norm = String(h || '').trim();
+    var col = i + 1;
+    if (norm && col !== colEmpresa && col !== colAccion && col !== colSucursal) colByMes[norm.toUpperCase()] = col;
+  });
+
+  var lastRow = sheet.getLastRow();
+  var existentes = lastRow >= startRow
+    ? sheet.getRange(startRow, 1, lastRow - startRow + 1, lastCol).getValues()
+    : [];
+
+  (data.filas || []).forEach(function (fila) {
+    var targetRow = null;
+    for (var i = 0; i < existentes.length; i++) {
+      var r = existentes[i];
+      if (String(r[colEmpresa - 1]).trim() === fila.empresaId && String(r[colAccion - 1]).trim() === fila.accion) {
+        targetRow = startRow + i;
+        break;
+      }
+    }
+    if (!targetRow) {
+      targetRow = sheet.getLastRow() + 1;
+      sheet.getRange(targetRow, colEmpresa).setValue(fila.empresaId);
+      sheet.getRange(targetRow, colAccion).setValue(fila.accion);
+      if (colSucursal) sheet.getRange(targetRow, colSucursal).setValue(fila.sucursal);
+    }
+    Object.keys(fila.valores || {}).forEach(function (mesNombre) {
+      var col = colByMes[mesNombre.toUpperCase()];
+      if (!col) return;
+      sheet.getRange(targetRow, col).setValue(fila.valores[mesNombre]);
+    });
+  });
 }
 
 // Defensiva: si la pestaña Seguimiento_CSE no está o no tiene el formato

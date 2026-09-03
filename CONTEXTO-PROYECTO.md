@@ -2413,6 +2413,40 @@ exacto — es la única fila que refleja de verdad "hubo actividad este mes"). V
 harness de Node replicando el patrón real (Meta%/Acumulado rellenos hasta diciembre, % Real
 solo en Junio/Julio): `MESES_ACTIVOS` ahora corta correctamente en `["Enero", ..., "Julio"]`.
 
+## Vital: Seguimiento CSE editable desde el visor — 2026-09-03
+El usuario notó que a diferencia de otros proyectos (seguimiento-Euro), no podía editar el
+Seguimiento CSE (Correo/Reunión/Encuesta) directamente desde el visor de Vital — quedaba
+solo-lectura porque se copió de Gespania, que tampoco lo tiene editable.
+
+Se portó el patrón ya probado de `seguimiento-Euro` (`dotCSEEditable`/`cseOnToggle`/
+`cseSaveAll`, con autoguardado a los 1,5s de inactividad), con un ajuste importante: en Vital
+`emp.cse[key][mes]` es **boolean** (`leerCSE_()` ya normaliza "SI"/"NO" a true/false antes de
+mandarlo al front), a diferencia de Euro donde es el string crudo "SI"/"NO"/"N/A" — así que el
+ciclo de click quedó `vacío(undefined) → SI(true) → NO(false) → vacío` sobre boolean/undefined
+en vez de sobre 3 strings, y al guardar se convierte explícitamente a texto "SI"/"NO"/"" antes
+de mandarlo al backend (si se manda un boolean crudo, Sheets lo guarda como TRUE/FALSE, que
+`normalizeSiNo_()` no reconoce al releer — quedaría "sin dato" para siempre).
+
+De paso se agregó la fila de "Encuesta" (el backend ya la soportaba vía `mapAccion` en
+`leerCSE_()`, solo faltaba en la tabla — Gespania la había sacado a propósito, pero no hay
+motivo para que Vital la tenga oculta también).
+
+**Backend** (`Code-Vital.gs`): se agregó `writeCSE_()` (portado de `Code-Euro.gs`, mismo
+criterio de match por empresa_id+Acción — crea la fila si no existe, la actualiza si ya
+existe) y se conectó `doPost` para el tipo `'cse'`. Ojo con el nombre exacto de la columna:
+Vital usa **"Acción CSE"** (no "Acción" como Euro) — `writeCSE_` busca ambos por si acaso.
+
+Verificado con harness de Node: `writeCSE_` crea la fila en el primer guardado y la actualiza
+(sin duplicar) en el segundo. La lógica del cliente se verificó por revisión de código (no se
+pudo probar en vivo en el navegador por inestabilidad de la herramienta esa sesión) — está
+calcada 1:1 del patrón de Euro, que ya funciona en producción, con los ajustes de boolean
+documentados arriba.
+
+**Importante**: hay que volver a pegar `Code-Vital.gs` en el editor de Apps Script y crear una
+nueva versión de despliegue para que el guardado funcione (el visor ya está publicado con la
+parte de lectura/edición, pero el guardado va a fallar con un toast de error hasta que se
+redespliegue el backend).
+
 ## Cómo verificar sintaxis JS del archivo
 El HTML es un solo archivo con `<script>...</script>` embebido. Para validar sintaxis:
 ```bash
