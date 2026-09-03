@@ -209,7 +209,7 @@ function readRespelSheet_() {
 // [{empresaId, sucursal, accion, valores:{Mes:"SI"/"NO"/""}}, ...] — el
 // texto de "accion" tiene que coincidir EXACTO con lo que espera
 // leerCSE_()/mapAccion más abajo ("Correo seguimiento"/"Reunión
-// seguimiento"/"Encuesta seguimiento"). Mismo patrón ya usado en
+// seguimiento"/"Charlas"). Mismo patrón ya usado en
 // Code-Vital.gs/Code-Euro.gs.
 function writeCSE_(ss, data) {
   var sheet = ss.getSheetByName('👥 Seguimiento_CSE') || ss.getSheetByName('Seguimiento_CSE');
@@ -497,7 +497,8 @@ function leerCSE_(empIdsValidos) {
   var mapAccion = {
     "Correo seguimiento": "correo",
     "Reunión seguimiento": "reunion",
-    "Encuesta seguimiento": "encuesta"
+    "Charlas": "encuesta",
+    "Encuesta seguimiento": "encuesta" // texto viejo, por si quedó alguna fila así en el Sheet
   };
 
   var cseData = {};
