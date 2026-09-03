@@ -2481,6 +2481,48 @@ su lugar — mismo tratamiento que Gespania recibió en su momento.
 herramienta esta sesión (varios intentos fallidos) — el cambio se verificó por sintaxis
 (`node --check`) y revisión estática, calcado 1:1 del patrón ya probado de Gespania.
 
+## ANDO: mismas mejoras de Vital portadas al visor standalone — 2026-09-03
+El usuario pidió aplicarle a `Visor-de-Objetivos-ANDO` "todo lo que hicimos para Vital".
+
+**Hallazgo antes de tocar nada**: el `DATA_SOURCE_URL` del visor de ANDO
+(`AKfycbzSF9enqWrvtcQFVqWr2Xr3A5lHcJ18NF3l5gZmZr0TyVZbWfs4MfxXthYofxJeiNo`) es una Apps Script
+**completamente distinta** a `Code-Ando.gs` (el que usa `valorizacion-recylink.html`,
+`AKfycbxDXNb5jL5CsJDEUy71c8fARsoXB3ZzuEBs4Z9zEa7ZQhLBgvuDcWmUNAOa_VIxdTg`) — dos proyectos de
+Apps Script separados para la misma empresa. Confirmado con `curl`: la URL del visor no
+devolvía JSON válido (una página HTML de error/verificación), y no había copia de su código en
+este repo. Se le pidió el código al usuario y se guardó como **`Code-Ando-Visor.gs`** (nuevo
+archivo, para no confundirlo con `Code-Ando.gs`).
+
+Cambios aplicados (mismo alcance que Vital):
+- **`calcularMesesActivos_` (Code-Ando-Visor.gs)**: mismo bug de "salta a Diciembre" ya
+  encontrado en Vital/Gespania/Socovesa/Salfa — se sacó el escaneo de `meta`/`acumulado`,
+  queda solo `meses` (% Real).
+- **Seguimiento CSE editable**: se agregó `writeCSE_()` en `Code-Ando-Visor.gs` (mismo patrón
+  que Vital/Euro) y `dotCSEEditable`/`cseOnToggle`/`cseSaveAll` en
+  `Visor-de-Objetivos-ANDO/index.html` — con una diferencia: este archivo no tiene Minutas (sin
+  `mnShowToast`), así que el feedback de guardado reusa el banner
+  `mostrarEstadoCarga_`/`ocultarEstadoCarga_` que ya existía para el estado de carga inicial.
+  Se agregó también la fila de "Encuesta" (el backend ya la soportaba, faltaba en la tabla).
+- **Comparativo Real/Acumulado/Meta**: revisado, pero la tarjeta de "Valorización" de este
+  visor ya es distinta a la de Vital (es un agregado de TODA la empresa — "X de Y sucursales
+  cumplen su meta" — no una tarjeta por sucursal con avance normalizado a 0-100 que esconda los
+  números reales) — no se encontró el mismo problema, así que no se tocó.
+
+**Nota encontrada de paso, NO corregida (fuera de lo pedido)**: `writeValorizacion` en
+`Code-Ando-Visor.gs` usa el patrón viejo de borrado (por empresa_id solo, sin mirar "Tipo") —
+mismo tipo de bug de integridad ya corregido en Gespania/Socovesa/Salfa/Euro. Se documenta en
+un comentario en el archivo; no se tocó porque no fue parte de lo pedido.
+
+Verificado con harness de Node: `writeCSE_` crea/actualiza sin duplicar, `calcularMesesActivos_`
+corta en el mes correcto en vez de Diciembre. El navegador siguió sin conectar (varios
+intentos), así que el frontend no se pudo probar visualmente esta vez — el cambio es una copia
+directa del patrón ya probado en Vital, con la única adaptación real (reusar
+`mostrarEstadoCarga_` en vez de `mnShowToast`) revisada por lectura de código.
+
+**Importante**: hay que pegar `Code-Ando-Visor.gs` en el editor de Apps Script del proyecto
+correcto (el que sirve `DATA_SOURCE_URL` en `Visor-de-Objetivos-ANDO/index.html`, NO el mismo
+proyecto que `Code-Ando.gs`) y crear una nueva versión de despliegue.
+
 ## Cómo verificar sintaxis JS del archivo
 El HTML es un solo archivo con `<script>...</script>` embebido. Para validar sintaxis:
 ```bash
