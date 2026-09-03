@@ -1034,6 +1034,13 @@ function construirEmpresas_(traza, val, cse, objetivosPorEmpresa, objetivosMaest
   return empresas;
 }
 
+// OJO (2026-09-03): no escanear val[emp].meta acá — syncMetas() (cliente)
+// escribe el mismo valor de meta repetido en los 12 meses del año
+// (Enero..Diciembre) sin importar si hay actividad real esos meses, así que
+// incluir "meta" en este cálculo hacía que MESES_ACTIVOS siempre llegara
+// hasta Diciembre en vez del último mes con datos reales (bug real,
+// encontrado en Code-Vital.gs y portado acá). Solo "meses" (% Real) y
+// "acumulado" (% Acumulado) reflejan actividad real.
 function calcularMesesActivos_(traza, val, cse) {
   var maxIdx = -1;
   function scan(obj) {
@@ -1043,7 +1050,7 @@ function calcularMesesActivos_(traza, val, cse) {
     });
   }
   Object.keys(traza.porEmpresaMes).forEach(function (emp) { scan(traza.porEmpresaMes[emp]); });
-  Object.keys(val).forEach(function (emp) { scan(val[emp].meses); scan(val[emp].meta); scan(val[emp].acumulado); });
+  Object.keys(val).forEach(function (emp) { scan(val[emp].meses); scan(val[emp].acumulado); });
   Object.keys(cse.anualData).forEach(function (emp) {
     Object.keys(cse.anualData[emp]).forEach(function (accion) { scan(cse.anualData[emp][accion]); });
   });

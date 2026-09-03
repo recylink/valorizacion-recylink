@@ -2377,6 +2377,25 @@ peso" mostrando el % real acumulado vs. la meta.
    quiere dejar solo la fila de Vital/Obra Vallenar. Ningún `Code-*.gs` lee esta pestaña (es
    solo referencia humana), así que no bloquea nada funcionalmente, pero conviene limpiarla.
 
+## Visores standalone: el selector de mes siempre saltaba a Diciembre — 2026-09-03
+El usuario notó que el visor de Vital mostraba Diciembre por defecto en vez del último mes con
+datos reales. Causa: `calcularMesesActivos_()` (backend) escaneaba `val[emp].meta` (la fila
+"Meta %" de ♻️ Valorización) junto con `meses`/`acumulado` para determinar el último mes
+"activo" — pero `syncMetas()` (cliente) escribe la meta repetida en los 12 meses del año
+(Enero..Diciembre) sin importar si hay actividad real esos meses, así que `MESES_ACTIVOS`
+siempre terminaba llegando hasta Diciembre. El frontend (`mesActual =
+MESES_ACTIVOS[MESES_ACTIVOS.length-1]`) ya elegía correctamente "el último mes de
+MESES_ACTIVOS" — el bug estaba en qué metía el backend en esa lista, no en cómo se elegía.
+
+Se quitó `scan(val[emp].meta)` de `calcularMesesActivos_()` — mismo bug encontrado y corregido
+en **Code-Vital.gs, Code-Gespania.gs, Code-Socovesa.gs y Code-Salfa.gs** (los 4 tenían el mismo
+código copiado). Verificado con harness de Node en Vital: con Meta % puesta en los 12 meses
+pero datos reales solo hasta Agosto, `MESES_ACTIVOS` ahora corta en `["Enero", ..., "Agosto"]`
+en vez de llegar a Diciembre.
+
+**Importante**: hay que volver a pegar cada `Code-*.gs` en su respectivo editor de Apps Script
+y crear una nueva versión de despliegue para que el fix tome efecto en cada visor.
+
 ## Cómo verificar sintaxis JS del archivo
 El HTML es un solo archivo con `<script>...</script>` embebido. Para validar sintaxis:
 ```bash
