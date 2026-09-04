@@ -855,7 +855,8 @@ function leerObjetivosReales_() {
   var idxEstado = h.indexOf("% cumplimiento");
   var idxDet = h.indexOf("Detalle");
 
-  var result = {}; // empId -> texto -> { mesIdx, avance, ok, detalle }
+  var result = {};    // empId -> texto -> { mesIdx, avance, ok, detalle } (último mes)
+  var historial = {}; // empId -> texto -> [{ mesIdx, ok }, ...] (todos los meses, para KPI costo)
 
   sr.rows.forEach(function (r) {
     var suc = String(r[idxSuc] || "").trim();
@@ -883,6 +884,41 @@ function leerObjetivosReales_() {
     if (!prev || mesIdx > prev.mesIdx) {
       result[empId][texto] = { mesIdx: mesIdx, avance: avance, ok: ok, detalle: detalle };
     }
+
+    if (mesIdx >= 0 && ok !== null) {
+      historial[empId] = historial[empId] || {};
+      historial[empId][texto] = historial[empId][texto] || [];
+      historial[empId][texto].push({ mesIdx: mesIdx, ok: ok });
+    }
+  });
+
+  // "Incorporar KPI de costo - valorización" (a pedido del usuario,
+  // 2026-09-03: "si en Febrero hay dato de costo ingreso, por qué no hay %
+  // de avance"): con "último mes gana" (arriba), un mes bueno (ej. Febrero)
+  // quedaba tapado por un mes malo posterior (ej. Julio), mostrando "No"
+  // aunque sí se haya usado el KPI de costo en algún momento del año. Para
+  // ESTE objetivo se reemplaza por el % de meses evaluados que salieron OK
+  // (mismo criterio que pctKpiCostoIngresoSucursal_ en Seguimiento-Abastible/
+  // Salfa) — Febrero OK entre 6 meses evaluados ya se refleja como avance,
+  // en vez de desaparecer.
+  Object.keys(historial).forEach(function (empId) {
+    Object.keys(historial[empId]).forEach(function (texto) {
+      if (!/kpi.*costo/i.test(texto)) return;
+      var meses = historial[empId][texto];
+      var totalEval = meses.length;
+      var totalOk = meses.filter(function (m) { return m.ok; }).length;
+      var mesesOk = meses.filter(function (m) { return m.ok; }).map(function (m) { return MESES[m.mesIdx]; });
+      var avance = totalEval > 0 ? Math.round(totalOk / totalEval * 100) : null;
+      result[empId] = result[empId] || {};
+      result[empId][texto] = {
+        mesIdx: meses[meses.length - 1].mesIdx,
+        avance: avance,
+        ok: avance !== null && avance >= 100,
+        detalle: totalOk > 0
+          ? totalOk + ' de ' + totalEval + ' meses con costo o ingreso registrado (' + mesesOk.join(', ') + ')'
+          : 'Sin costo ni ingreso registrado en ningún mes evaluado'
+      };
+    });
   });
 
   return result;
