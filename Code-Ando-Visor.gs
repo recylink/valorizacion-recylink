@@ -896,27 +896,46 @@ function leerObjetivosReales_() {
   // 2026-09-03: "si en Febrero hay dato de costo ingreso, por qué no hay %
   // de avance"): con "último mes gana" (arriba), un mes bueno (ej. Febrero)
   // quedaba tapado por un mes malo posterior (ej. Julio), mostrando "No"
-  // aunque sí se haya usado el KPI de costo en algún momento del año. Para
-  // ESTE objetivo se reemplaza por el % de meses evaluados que salieron OK
-  // (mismo criterio que pctKpiCostoIngresoSucursal_ en Seguimiento-Abastible/
-  // Salfa) — Febrero OK entre 6 meses evaluados ya se refleja como avance,
-  // en vez de desaparecer.
+  // aunque sí se haya usado el KPI de costo en algún momento del año.
+  //
+  // Extendido a "100% trazabilidad" y "Cumplimiento normativa SINADER" (a
+  // pedido del usuario, mismo día: "¿funciona así para todos los
+  // objetivos?" → "sí" a aplicarlo a ambos): mismo problema, un mes 100%
+  // completo tapado por un mes posterior incompleto. Para estos 3 objetivos
+  // se reemplaza "último mes gana" por el % de meses evaluados que
+  // estuvieron 100% completos ese mes (mismo criterio que
+  // pctKpiCostoIngresoSucursal_ en Seguimiento-Abastible/Salfa) — un mes
+  // bueno entre varios evaluados ya se refleja como avance, en vez de
+  // desaparecer tapado por un mes malo posterior.
   Object.keys(historial).forEach(function (empId) {
     Object.keys(historial[empId]).forEach(function (texto) {
-      if (!/kpi.*costo/i.test(texto)) return;
+      var esKpiCosto = /kpi.*costo/i.test(texto);
+      var esTrazabilidad = /trazabilidad/i.test(texto);
+      var esSinader = /sinader/i.test(texto);
+      if (!esKpiCosto && !esTrazabilidad && !esSinader) return;
+
       var meses = historial[empId][texto];
       var totalEval = meses.length;
       var totalOk = meses.filter(function (m) { return m.ok; }).length;
       var mesesOk = meses.filter(function (m) { return m.ok; }).map(function (m) { return MESES[m.mesIdx]; });
       var avance = totalEval > 0 ? Math.round(totalOk / totalEval * 100) : null;
+
+      var detalle;
+      if (totalOk === 0) {
+        detalle = esKpiCosto ? 'Sin costo ni ingreso registrado en ningún mes evaluado'
+          : esSinader ? 'Ningún mes evaluado con 100% de declaraciones SINADER'
+          : 'Ningún mes evaluado con 100% de trazabilidad';
+      } else {
+        var sufijo = esKpiCosto ? 'con costo o ingreso registrado' : 'con 100% completo';
+        detalle = totalOk + ' de ' + totalEval + ' meses ' + sufijo + ' (' + mesesOk.join(', ') + ')';
+      }
+
       result[empId] = result[empId] || {};
       result[empId][texto] = {
         mesIdx: meses[meses.length - 1].mesIdx,
         avance: avance,
         ok: avance !== null && avance >= 100,
-        detalle: totalOk > 0
-          ? totalOk + ' de ' + totalEval + ' meses con costo o ingreso registrado (' + mesesOk.join(', ') + ')'
-          : 'Sin costo ni ingreso registrado en ningún mes evaluado'
+        detalle: detalle
       };
     });
   });
