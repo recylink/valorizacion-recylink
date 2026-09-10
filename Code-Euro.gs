@@ -484,9 +484,16 @@ function writeCSE_(ss, data) {
   var idx = {};
   headers.forEach(function (h, i) { if (h) idx[String(h).trim()] = i + 1; });
   var colEmpresa = idx['empresa_id'];
-  var colAccion = idx['Acción'] || idx['Accion'];
+  // FIX (2026-09-10, a pedido del usuario: "el seguimiento CSE no funciona
+  // tan bien"): el header real de la columna en el Sheet es "Acción CSE"
+  // (confirmado leyendo la planilla), no "Acción" a secas — con la
+  // comparación vieja, colAccion siempre quedaba undefined y esta función
+  // tiraba error en CADA guardado, así que ningún cambio de CSE se
+  // guardaba nunca (aunque el visor mostrara "Guardado" en el toast antes
+  // de que llegara la respuesta de error).
+  var colAccion = idx['Acción CSE'] || idx['Accion CSE'] || idx['Acción'] || idx['Accion'];
   var colSucursal = idx['Sucursal'];
-  if (!colEmpresa || !colAccion) throw new Error('Encabezados "empresa_id"/"Acción" no encontrados en Seguimiento_CSE');
+  if (!colEmpresa || !colAccion) throw new Error('Encabezados "empresa_id"/"Acción CSE" no encontrados en Seguimiento_CSE');
 
   var colByMes = {};
   headers.forEach(function (h, i) {
