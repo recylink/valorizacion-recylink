@@ -156,6 +156,7 @@ tbody tr:hover{background:var(--surface2)}
       <div class="sync-btns">
         <button class="btn btn-ghost" id="btn-load-sheets">&#8595; Cargar desde Sheets</button>
         <button class="btn btn-ghost" id="btn-sync-valorizacion" onclick="sincronizarValorizacionManual()">&#9851; Sincronizar Valorización</button>
+        <button class="btn btn-ghost" id="btn-sync-fgr" onclick="sincronizarFGRManual()" style="display:none;">&#127793; Sincronizar FGR</button>
       </div>
     </div>
     <div class="sync-log" id="sync-log"></div>
@@ -1286,6 +1287,7 @@ function resetData() {
   document.getElementById('obj-empty').style.display = hasObj ? 'none' : '';
   document.getElementById('obj-content').style.display = hasObj ? 'block' : 'none';
   document.getElementById('btn-editar-metas').style.display = (empresaActual==='copec'||empresaActual==='acciona'||empresaActual==='gespania'||empresaActual==='vital') ? 'inline-flex' : 'none';
+  document.getElementById('btn-sync-fgr').style.display = 'none';
   document.getElementById('btn-gestionar-sucursales').style.display = 'none';
   document.getElementById('btn-gestionar-objetivos-suc').style.display = 'none';
   document.getElementById('sucursales-form').style.display = 'none';
@@ -1550,6 +1552,7 @@ function processData(rows, fname) {
   document.getElementById('obj-empty').style.display=hasObj?'none':'';
   document.getElementById('obj-content').style.display=hasObj?'block':'none';
   document.getElementById('btn-editar-metas').style.display=(empresaActual==='copec'||empresaActual==='acciona'||empresaActual==='gespania'||empresaActual==='vital')?'inline-flex':'none';
+  document.getElementById('btn-sync-fgr').style.display=(empresaActual==='euro')?'inline-flex':'none';
   document.getElementById('btn-gestionar-sucursales').style.display=sucursales.length>0?'inline-flex':'none';
   document.getElementById('btn-gestionar-objetivos-suc').style.display=(sucursales.length>0&&emp.objetivos&&emp.objetivos.length>0)?'inline-flex':'none';
 
@@ -1753,39 +1756,17 @@ function autoSync(rows) {
   if (empresaActual === 'euro') {
     var fgrCo2 = calcFgrCo2Euro();
     var objFgr = emp.objetivos.find(function(o){ return o.tipo==='manual' && o.id==='fgr'; });
-    // FIX (2026-09-10, caso real: FGR "calculado a futuro" en Amengual/
-    // Departamental/Santa Elena para Septiembre-Diciembre 2026): fgrCo2[suc]
-    // trae TODOS los años con datos (2025 y 2026 para estas 3 obras, que
-    // vienen en curso desde 2025), pero antes se armaba un solo objeto plano
-    // por mes (SEPTIEMBRE, OCTUBRE, ...) mezclando ambos años, y se escribia
-    // con el Año del ULTIMO mesKey procesado (el mas reciente
-    // cronologicamente, ej. "2026-08"). Si un mes solo tenia calculo en 2025
-    // (ej. Septiembre, porque el % Avance 2026 de ese mes esta vacio y
-    // calcFgrCo2Euro no genera "2026-09"), ese valor de 2025 quedaba
-    // etiquetado como si fuera de 2026 al escribirlo — pareciendo un FGR
-    // calculado para un mes futuro que en realidad nunca se calculo. Ahora
-    // se agrupa por Año ademas de por mes, igual criterio que
-    // writeValorizacion/writeTrazabilidad/writeObjetivos (fix 2026-08-31).
-    Object.keys(fgrCo2).forEach(function(suc){
-      var fgrPorAnio = {}, co2PorAnio = {};
-      Object.keys(fgrCo2[suc]).sort().forEach(function(mesKey){
-        var v = fgrCo2[suc][mesKey];
-        var anio = mesKey.slice(0,4);
-        var mesNombre = MESES_ES[parseInt(mesKey.slice(5))].toUpperCase();
-        fgrPorAnio[anio] = fgrPorAnio[anio] || {};
-        co2PorAnio[anio] = co2PorAnio[anio] || {};
-        fgrPorAnio[anio][mesNombre] = parseFloat(v.fgr.toFixed(3));
-        co2PorAnio[anio][mesNombre] = toSigFigs(v.co2m2, 5);
-        if (objFgr) {
+    if (objFgr) {
+      Object.keys(fgrCo2).forEach(function(suc){
+        Object.keys(fgrCo2[suc]).sort().forEach(function(mesKey){
+          var v = fgrCo2[suc][mesKey];
+          var anio = mesKey.slice(0,4);
           var pctCump = Math.min(100, (0.2/v.fgr)*100);
           filasObj.push([sucId(suc), suc, MESES_ES[parseInt(mesKey.slice(5))], anio, objFgr.nombre, parseFloat(pctCump.toFixed(1))+'%', 'FGR calculado: '+v.fgr.toFixed(2)+' m3/m2']);
-        }
+        });
       });
-      Object.keys(fgrPorAnio).forEach(function(anio){
-        filasAvance.push({empresa_id:sucId(suc), Sucursal:suc, Tipo:'FGR', Año:anio, valores:fgrPorAnio[anio]});
-        filasAvance.push({empresa_id:sucId(suc), Sucursal:suc, Tipo:'CO2ev/m2', Año:anio, valores:co2PorAnio[anio]});
-      });
-    });
+    }
+    filasAvance = construirFilasAvanceEuro_(fgrCo2);
     // Nota: "Acompañamiento en terreno..." ya no se arma acá — al ser
     // tipo:'acompanamiento_anual' (agregado a OBJ_ANUALES), calcObjetivos()
     // ya lo incluye como resultado anual, y el `filasObj = calcObjetivos()...`
@@ -1857,6 +1838,42 @@ function sincronizarValorizacionManual() {
   });
 }
 
+// Botón manual "Sincronizar FGR" (solo Euro): reenvía SOLO las filas
+// 'FGR'/'CO2ev/m2' de "% de avance" (todas las obras a la vez) sin pasar
+// por autoSync() completo — mismo motivo que "Sincronizar Valorización":
+// útil cuando los datos vienen de "Cargar desde Sheets" (sin volver a
+// subir el Excel) y solo hace falta refrescar el FGR calculado, por
+// ejemplo después de editar % Avance o m² totales en seguimiento-Euro.
+// A pedido del usuario (2026-09-10: "no se puede habilitar un botón
+// similar al de sincronizar valorización?"), tras encontrar FGR mal
+// calculado para meses futuros en el Sheet.
+function sincronizarFGRManual() {
+  var emp = EMPRESAS[empresaActual];
+  if (empresaActual !== 'euro' || !emp || !sucursales.length) {
+    toast('Esta sincronización solo aplica a Euro, con datos cargados', 'err');
+    return;
+  }
+  var btn = document.getElementById('btn-sync-fgr');
+  if (btn) { btn.disabled = true; btn.textContent = 'Sincronizando…'; }
+  var filasAvance = construirFilasAvanceEuro_(calcFgrCo2Euro());
+  if (!filasAvance.length) {
+    toast('No hay % Avance ni m² totales cargados todavía para calcular FGR', 'err');
+    if (btn) { btn.disabled = false; btn.textContent = '🌱 Sincronizar FGR'; }
+    return;
+  }
+  fetch(emp.scriptUrl, {
+    method:'POST', mode:'no-cors',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({tipo:'avance', filas:filasAvance})
+  }).then(function(){
+    toast('FGR / CO2ev·m² sincronizados en el Sheet');
+  }).catch(function(err){
+    toast('Error al sincronizar FGR: '+err.message, 'err');
+  }).finally(function(){
+    if (btn) { btn.disabled = false; btn.textContent = '🌱 Sincronizar FGR'; }
+  });
+}
+
 // Valorización
 // % Acumulado tal como viene de la hoja de Sheets (fila "% Acumulado"), calculado
 // en autoSync() con el kg real ponderado. Se usa cuando los datos vienen de Sheets
@@ -1900,21 +1917,29 @@ function kgRealPorMesSuc_(suc) {
     if (!anio || idxMes === null) return;
     var mesKey = anio + '-' + String(idxMes).padStart(2,'0');
     var cant = parseFloat(esM3 ? r['Total M3'] : r['Total KG']) || 0;
+    // Tons. CO2eq. evitadas: se acumula acá también (además de total/val)
+    // para que calcFgrCo2Euro() pueda calcular Ton CO2 evitadas/m2 sin
+    // depender de totalResiduosRows (solo disponible en la sesión con un
+    // Excel recién subido) — mismo motivo por el que este merge ya existe
+    // para total/val (ver sincronizarFGRManual()).
+    var co2 = parseFloat(r['Tons. CO2eq. evitadas']) || 0;
     var valorizado = ((r['Valorizado/No Valorizado']||'')+'') === 'Valorizado';
-    if (!porMes[mesKey]) porMes[mesKey] = {total:0, val:0};
+    if (!porMes[mesKey]) porMes[mesKey] = {total:0, val:0, co2:0};
     porMes[mesKey].total += cant;
     if (valorizado) porMes[mesKey].val += cant;
+    porMes[mesKey].co2 += co2;
   });
   var mesesEnSesion = {};
   totalResiduosRows.forEach(function(r){ if (r.suc === suc) mesesEnSesion[r.mes] = true; });
-  Object.keys(mesesEnSesion).forEach(function(mesKey){ porMes[mesKey] = {total:0, val:0}; });
+  Object.keys(mesesEnSesion).forEach(function(mesKey){ porMes[mesKey] = {total:0, val:0, co2:0}; });
   totalResiduosRows.forEach(function(r){
     if (r.suc !== suc) return;
     if (normResiduo(r.residuo) === 'excavacion') return;
-    if (!porMes[r.mes]) porMes[r.mes] = {total:0, val:0};
+    if (!porMes[r.mes]) porMes[r.mes] = {total:0, val:0, co2:0};
     var cant = esM3 ? r.m3 : r.kg;
     porMes[r.mes].total += cant;
     if (r.valorizado) porMes[r.mes].val += cant;
+    porMes[r.mes].co2 += (r.co2||0);
   });
   return porMes;
 }
@@ -1960,19 +1985,68 @@ function getAcum(suc,upTo,anio){
   return tot===0?null:val/tot*100;
 }
 
+// Arma las filas 'FGR'/'CO2ev/m2' de "% de avance" a partir del resultado
+// de calcFgrCo2Euro(), agrupando por Año además de por mes. Factorizado de
+// autoSync() para reutilizarlo también desde el botón manual
+// "Sincronizar FGR" (sincronizarFGRManual()).
+// FIX (2026-09-10, caso real: FGR "calculado a futuro" en Amengual/
+// Departamental/Santa Elena para Septiembre-Diciembre 2026): fgrCo2[suc]
+// trae TODOS los años con datos (2025 y 2026 para estas 3 obras, que
+// vienen en curso desde 2025), pero antes se armaba un solo objeto plano
+// por mes (SEPTIEMBRE, OCTUBRE, ...) mezclando ambos años, y se escribia
+// con el Año del ÚLTIMO mesKey procesado (el más reciente
+// cronológicamente, ej. "2026-08"). Si un mes solo tenía cálculo en 2025
+// (ej. Septiembre, porque el % Avance 2026 de ese mes está vacío y
+// calcFgrCo2Euro no genera "2026-09"), ese valor de 2025 quedaba
+// etiquetado como si fuera de 2026 al escribirlo — pareciendo un FGR
+// calculado para un mes futuro que en realidad nunca se calculó. Ahora se
+// agrupa por Año además de por mes, igual criterio que
+// writeValorizacion/writeTrazabilidad/writeObjetivos (fix 2026-08-31).
+function construirFilasAvanceEuro_(fgrCo2) {
+  var filasAvance = [];
+  Object.keys(fgrCo2).forEach(function(suc){
+    var fgrPorAnio = {}, co2PorAnio = {};
+    Object.keys(fgrCo2[suc]).sort().forEach(function(mesKey){
+      var v = fgrCo2[suc][mesKey];
+      var anio = mesKey.slice(0,4);
+      var mesNombre = MESES_ES[parseInt(mesKey.slice(5))].toUpperCase();
+      fgrPorAnio[anio] = fgrPorAnio[anio] || {};
+      co2PorAnio[anio] = co2PorAnio[anio] || {};
+      fgrPorAnio[anio][mesNombre] = parseFloat(v.fgr.toFixed(3));
+      co2PorAnio[anio][mesNombre] = toSigFigs(v.co2m2, 5);
+    });
+    Object.keys(fgrPorAnio).forEach(function(anio){
+      filasAvance.push({empresa_id:sucId(suc), Sucursal:suc, Tipo:'FGR', Año:anio, valores:fgrPorAnio[anio]});
+      filasAvance.push({empresa_id:sucId(suc), Sucursal:suc, Tipo:'CO2ev/m2', Año:anio, valores:co2PorAnio[anio]});
+    });
+  });
+  return filasAvance;
+}
+
 // Euro: FGR (m3 acumulados / m2 construidos) y Ton CO2 evitadas/m2, usando
 // el % Avance manual (acumulado) + m2 totales de la hoja "% de avance", y el
 // m3/CO2 acumulado desde el inicio de la obra hasta ese mes (Excavación
 // excluida, igual criterio que el % de valorización). Devuelve
 // {suc: {mesKey: {fgr, co2m2}}}; un mes queda fuera si no hay % Avance o
 // m2 totales cargados para esa obra todavía.
+// FIX (2026-09-10, a pedido del usuario: botón manual para sincronizar
+// FGR sin re-subir el Excel): antes usaba valMatrix[suc][mes].total para
+// el m3 acumulado — pero valMatrix, cuando el mes viene SOLO de "Cargar
+// desde Sheets" (sin Excel subido en esta sesión), guarda un placeholder
+// {total:100, val:pct} (ver loadSheetsData, fromSheets:true) que no es un
+// m3 real, asi que el FGR salía mal. El CO2 acumulado además solo miraba
+// totalResiduosRows (vacío sin Excel en la sesión), dando siempre 0.
+// Ahora usa kgRealPorMesSuc_(suc) — el mismo merge Sheets+sesión, ya
+// probado y usado por el % de valorización, que trae m3/co2 reales sin
+// importar el origen de los datos.
 function calcFgrCo2Euro() {
   var out = {};
   if (empresaActual !== 'euro') return out;
   sucursales.forEach(function(suc) {
     var m2Total = euroAvance.m2Totales[suc];
     if (!m2Total) return;
-    var mesesSuc = Object.keys(valMatrix[suc]||{}).sort();
+    var porMes = kgRealPorMesSuc_(suc);
+    var mesesSuc = Object.keys(porMes).sort();
     mesesSuc.forEach(function(mesKey) {
       var pctAv = euroAvance.pctPorSucMes[suc] && euroAvance.pctPorSucMes[suc][mesKey];
       if (pctAv === undefined || pctAv === null) return;
@@ -1981,12 +2055,8 @@ function calcFgrCo2Euro() {
       var cumM3 = 0, cumCo2 = 0;
       mesesSuc.forEach(function(m2){
         if (m2 > mesKey) return;
-        cumM3 += (valMatrix[suc][m2].total||0);
-      });
-      totalResiduosRows.forEach(function(r){
-        if (r.suc !== suc || r.mes > mesKey) return;
-        if (normResiduo(r.residuo) === 'excavacion') return;
-        cumCo2 += (r.co2||0);
+        cumM3 += (porMes[m2].total||0);
+        cumCo2 += (porMes[m2].co2||0);
       });
       out[suc] = out[suc] || {};
       out[suc][mesKey] = { fgr: cumM3/m2Construidos, co2m2: cumCo2/m2Construidos };
@@ -2924,6 +2994,7 @@ function loadSheetsData(data) {
   document.getElementById('obj-content').style.display = hasObj || empresaActual === 'copec' || empresaActual === 'abastible' ? 'block' : 'none';
   document.getElementById('obj-empty').style.display = (hasObj || empresaActual === 'copec' || empresaActual === 'abastible') ? 'none' : '';
   document.getElementById('btn-editar-metas').style.display = (empresaActual === 'copec'||empresaActual==='acciona'||empresaActual==='gespania'||empresaActual==='vital') ? 'inline-flex' : 'none'; // Abastible no tiene metas editables
+  document.getElementById('btn-sync-fgr').style.display = (empresaActual === 'euro') ? 'inline-flex' : 'none';
   document.getElementById('btn-gestionar-sucursales').style.display = sucursales.length > 0 ? 'inline-flex' : 'none';
   document.getElementById('btn-gestionar-objetivos-suc').style.display = (sucursales.length > 0 && emp.objetivos && emp.objetivos.length > 0) ? 'inline-flex' : 'none';
 
