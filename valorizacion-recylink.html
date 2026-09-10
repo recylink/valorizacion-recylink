@@ -1753,27 +1753,38 @@ function autoSync(rows) {
   if (empresaActual === 'euro') {
     var fgrCo2 = calcFgrCo2Euro();
     var objFgr = emp.objetivos.find(function(o){ return o.tipo==='manual' && o.id==='fgr'; });
-    var fgrValores = {}, co2Valores = {};
+    // FIX (2026-09-10, caso real: FGR "calculado a futuro" en Amengual/
+    // Departamental/Santa Elena para Septiembre-Diciembre 2026): fgrCo2[suc]
+    // trae TODOS los años con datos (2025 y 2026 para estas 3 obras, que
+    // vienen en curso desde 2025), pero antes se armaba un solo objeto plano
+    // por mes (SEPTIEMBRE, OCTUBRE, ...) mezclando ambos años, y se escribia
+    // con el Año del ULTIMO mesKey procesado (el mas reciente
+    // cronologicamente, ej. "2026-08"). Si un mes solo tenia calculo en 2025
+    // (ej. Septiembre, porque el % Avance 2026 de ese mes esta vacio y
+    // calcFgrCo2Euro no genera "2026-09"), ese valor de 2025 quedaba
+    // etiquetado como si fuera de 2026 al escribirlo — pareciendo un FGR
+    // calculado para un mes futuro que en realidad nunca se calculo. Ahora
+    // se agrupa por Año ademas de por mes, igual criterio que
+    // writeValorizacion/writeTrazabilidad/writeObjetivos (fix 2026-08-31).
     Object.keys(fgrCo2).forEach(function(suc){
-      fgrValores[suc] = {};
-      co2Valores[suc] = {};
-      var anioFila = null;
+      var fgrPorAnio = {}, co2PorAnio = {};
       Object.keys(fgrCo2[suc]).sort().forEach(function(mesKey){
         var v = fgrCo2[suc][mesKey];
         var anio = mesKey.slice(0,4);
-        anioFila = anio;
         var mesNombre = MESES_ES[parseInt(mesKey.slice(5))].toUpperCase();
-        fgrValores[suc][mesNombre] = parseFloat(v.fgr.toFixed(3));
-        co2Valores[suc][mesNombre] = toSigFigs(v.co2m2, 5);
+        fgrPorAnio[anio] = fgrPorAnio[anio] || {};
+        co2PorAnio[anio] = co2PorAnio[anio] || {};
+        fgrPorAnio[anio][mesNombre] = parseFloat(v.fgr.toFixed(3));
+        co2PorAnio[anio][mesNombre] = toSigFigs(v.co2m2, 5);
         if (objFgr) {
           var pctCump = Math.min(100, (0.2/v.fgr)*100);
           filasObj.push([sucId(suc), suc, MESES_ES[parseInt(mesKey.slice(5))], anio, objFgr.nombre, parseFloat(pctCump.toFixed(1))+'%', 'FGR calculado: '+v.fgr.toFixed(2)+' m3/m2']);
         }
       });
-      if (anioFila) {
-        filasAvance.push({empresa_id:sucId(suc), Sucursal:suc, Tipo:'FGR', Año:anioFila, valores:fgrValores[suc]});
-        filasAvance.push({empresa_id:sucId(suc), Sucursal:suc, Tipo:'CO2ev/m2', Año:anioFila, valores:co2Valores[suc]});
-      }
+      Object.keys(fgrPorAnio).forEach(function(anio){
+        filasAvance.push({empresa_id:sucId(suc), Sucursal:suc, Tipo:'FGR', Año:anio, valores:fgrPorAnio[anio]});
+        filasAvance.push({empresa_id:sucId(suc), Sucursal:suc, Tipo:'CO2ev/m2', Año:anio, valores:co2PorAnio[anio]});
+      });
     });
     // Nota: "Acompañamiento en terreno..." ya no se arma acá — al ser
     // tipo:'acompanamiento_anual' (agregado a OBJ_ANUALES), calcObjetivos()
