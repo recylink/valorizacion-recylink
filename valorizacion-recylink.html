@@ -1827,11 +1827,19 @@ function getPct(suc,mes){
 // por kg/m3 real"). Si un mes está en AMBAS fuentes, gana la de esta sesión
 // (es el recálculo fresco; la fila del Sheet para ese mismo mes va a quedar
 // reemplazada en el próximo sync de todas formas).
+// FIX (2026-09-10, a pedido del usuario: "tambien se debe excluir la
+// excavacion para el %valorizacion"): Excavación se excluye del % de
+// valorización tal como ya se excluye del cálculo de FGR en el visor
+// standalone de Euro (seguimiento-Euro) — antes esta función sumaba TODO
+// residuo tal cual venía de "Total Residuos", incluida la tierra de
+// excavación removida al iniciar el proyecto, lo que diluía el % para
+// obras con harta excavación sin valorizar.
 function kgRealPorMesSuc_(suc) {
   var esM3 = empresaActual === 'euro' || empresaActual === 'acciona'; // mismo criterio que metricaVal en processData()
   var porMes = {};
   totalResiduosDesdeSheets.forEach(function(r){
     if (((r['Sucursal']||'')+'') !== suc) return;
+    if (normResiduo(r['Residuo']) === 'excavacion') return;
     var anio = (r['Año']||'')+'';
     var mesLabel = (r['Mes']||'')+'';
     var idxMes = null;
@@ -1849,6 +1857,7 @@ function kgRealPorMesSuc_(suc) {
   Object.keys(mesesEnSesion).forEach(function(mesKey){ porMes[mesKey] = {total:0, val:0}; });
   totalResiduosRows.forEach(function(r){
     if (r.suc !== suc) return;
+    if (normResiduo(r.residuo) === 'excavacion') return;
     if (!porMes[r.mes]) porMes[r.mes] = {total:0, val:0};
     var cant = esM3 ? r.m3 : r.kg;
     porMes[r.mes].total += cant;
