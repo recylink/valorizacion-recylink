@@ -155,6 +155,7 @@ tbody tr:hover{background:var(--surface2)}
       </div>
       <div class="sync-btns">
         <button class="btn btn-ghost" id="btn-load-sheets">&#8595; Cargar desde Sheets</button>
+        <button class="btn btn-ghost" id="btn-sync-valorizacion" onclick="sincronizarValorizacionManual()">&#9851; Sincronizar Valorización</button>
       </div>
     </div>
     <div class="sync-log" id="sync-log"></div>
@@ -1564,10 +1565,13 @@ function processData(rows, fname) {
   });
 }
 
-function autoSync(rows) {
-  var emp = EMPRESAS[empresaActual];
-
-  // Preparar payload valorización
+// Arma las filas de "% Real"/"% Acumulado"/"Meta %" para TODAS las sucursales
+// de la empresa activa, a partir de valMatrix/metasFromSheets ya cargados
+// (por Excel o por "Cargar desde Sheets") — factorizado de autoSync() para
+// reutilizarlo también desde sincronizarValorizacionManual() (2026-09-10, a
+// pedido del usuario: mover el botón "Sincronizar Valorización" del visor
+// standalone de Euro a esta app, afectando todas las sucursales a la vez).
+function construirFilasValorizacion_() {
   var metasActuales = empresaActual === 'copec' ? getCopecMetas() : empresaActual === 'acciona' ? getAccionaMetas() : empresaActual === 'gespania' ? getGespaniaMetas() : empresaActual === 'vital' ? getVitalMetas() : empresaActual === 'abastible' ? ABASTIBLE_METAS : empresaActual === 'pms' ? getPmsMetas() : empresaActual === 'ccu' ? CCU_METAS : (empresaActual === 'salfa' || empresaActual === 'euro' || empresaActual === 'ando') ? metasFromSheets : {};
   var filasVal = [];
   // Euro y Socovesa: fila por Tipo POR AÑO (columna Año agregada a mano en la
@@ -1609,6 +1613,14 @@ function autoSync(rows) {
       filasVal.push([id,suc,'Meta %'].concat(mesesDisp.map(function(){ return metaVal; })));
     }
   });
+  return filasVal;
+}
+
+function autoSync(rows) {
+  var emp = EMPRESAS[empresaActual];
+
+  // Preparar payload valorización
+  var filasVal = construirFilasValorizacion_();
 
   // Total Residuos (Copec, Abastible, Gespania, Salfa, Euro, Ando y Socovesa): Sucursal | Mes | Residuo | Valorizado/No Valorizado | Respel no respel | Total KG | Total M3 [| Tons. CO2eq. evitadas]
   // Año (col. B) y Tons. CO2eq. evitadas son exclusivos de Euro/Socovesa/Gespania/Salfa (Año) y
@@ -1802,6 +1814,36 @@ function autoSync(rows) {
     .catch(function(err){
       toast('Error al sincronizar: '+err.message, 'err');
     });
+}
+
+// Botón manual "Sincronizar Valorización": reenvía SOLO la hoja de
+// Valorización (todas las sucursales de la empresa activa a la vez) sin
+// pasar por autoSync() completo — útil cuando los % ya se recalcularon en
+// esta sesión (ej. datos cargados con "Cargar desde Sheets", sin volver a
+// subir el Excel) y solo hace falta refrescar Valorización en el Sheet.
+// Reemplaza al botón "♻️ Sincronizar Valorización" que vivía en el visor
+// standalone de Euro (seguimiento-Euro/index.html) — movido acá y
+// generalizado a cualquier empresa (2026-09-10, a pedido del usuario).
+function sincronizarValorizacionManual() {
+  var emp = EMPRESAS[empresaActual];
+  if (!emp || !sucursales.length) {
+    toast('Selecciona una empresa con datos cargados primero', 'err');
+    return;
+  }
+  var btn = document.getElementById('btn-sync-valorizacion');
+  if (btn) { btn.disabled = true; btn.textContent = 'Sincronizando…'; }
+  var filasVal = construirFilasValorizacion_();
+  fetch(emp.scriptUrl, {
+    method:'POST', mode:'no-cors',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({tipo:'valorizacion', meses:mesesDisp, filas:filasVal})
+  }).then(function(){
+    toast('Valorización sincronizada — % Real y % Acumulado actualizados en el Sheet');
+  }).catch(function(err){
+    toast('Error al sincronizar Valorización: '+err.message, 'err');
+  }).finally(function(){
+    if (btn) { btn.disabled = false; btn.textContent = '♻️ Sincronizar Valorización'; }
+  });
 }
 
 // Valorización
