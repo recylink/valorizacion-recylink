@@ -374,6 +374,20 @@ function readAvanceSheet_() {
 // meses del header — la hoja puede empezar en cualquier mes, no
 // necesariamente Enero. Nunca toca las filas "% Avance" (ingreso manual):
 // el cliente solo envia filas con Tipo 'FGR' o 'CO2ev/m2'.
+//
+// FIX (2026-09-10, caso real: FGR "calculado a futuro" en Amengual/
+// Departamental/Santa Elena para Septiembre-Diciembre 2026): esta funcion
+// solo ESCRIBIA los meses presentes en fila.valores, nunca borraba los que
+// ya no vinieran — asi que un mes que en un sync anterior tuvo un valor de
+// FGR (ej. por un bug del lado del cliente que lo etiqueto con el Año
+// equivocado, ya corregido en valorizacion-recylink.html) se quedaba
+// pegado para siempre en el Sheet, aunque el sync actual ya no lo
+// calculara. Para las filas 'FGR'/'CO2ev/m2' (que el cliente SIEMPRE manda
+// completas y recalculadas desde cero en cada sync, a diferencia de
+// '% Avance' que es ingreso manual mes a mes) ahora se limpian primero
+// TODOS los meses de la fila antes de escribir los que vengan en
+// fila.valores, para que cualquier mes que ya no se calcule quede vacio en
+// vez de arrastrar un valor viejo.
 function writeAvance(ss, data) {
   var sheet = ss.getSheetByName('%avance') || ss.getSheetByName('% de avance');
   if (!sheet) throw new Error('Hoja "% de avance" no encontrada');
@@ -381,7 +395,13 @@ function writeAvance(ss, data) {
   var lastCol = sheet.getLastColumn();
   var headers = sheet.getRange(headerRow, 1, 1, lastCol).getValues()[0];
   var colByMes = {};
-  headers.forEach(function (h, i) { if (h) colByMes[String(h).trim().toUpperCase()] = i + 1; });
+  var mesCols = [];
+  headers.forEach(function (h, i) {
+    if (!h) return;
+    var col = i + 1;
+    colByMes[String(h).trim().toUpperCase()] = col;
+    if (col > 4) mesCols.push(col); // excluye empresa_id/Sucursal/Tipo/Año (cols 1-4)
+  });
 
   var lastRow = sheet.getLastRow();
   var existentes = lastRow >= startRow
@@ -401,8 +421,11 @@ function writeAvance(ss, data) {
     if (!targetRow) {
       targetRow = sheet.getLastRow() + 1;
       sheet.getRange(targetRow, 1, 1, 4).setValues([[fila.empresa_id || '', suc, tipo, anio]]);
-    } else if (fila.empresa_id) {
-      sheet.getRange(targetRow, 1).setValue(fila.empresa_id);
+    } else {
+      if (fila.empresa_id) sheet.getRange(targetRow, 1).setValue(fila.empresa_id);
+      if (tipo === 'FGR' || tipo === 'CO2ev/m2') {
+        mesCols.forEach(function (col) { sheet.getRange(targetRow, col).setValue(''); });
+      }
     }
     Object.keys(fila.valores || {}).forEach(function (mesNombre) {
       var col = colByMes[mesNombre.toUpperCase()];
