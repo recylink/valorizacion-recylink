@@ -259,14 +259,9 @@ function writeCostoIngreso(ss, data) {
 // Lee "Costo e Ingreso" agrupado por sucursal (empresa_id) → mes → residuos[],
 // con totales agregados por mes. Usada solo por el visor standalone
 // (buildPayload_); writeCostoIngreso / la pestaña en sí no cambian en nada.
-//
-// NOTA (2026-09-01): la hoja ahora tiene columna Año (col. B), pero esta
-// función sigue agrupando solo por nombre de mes (sin año) — igual
-// limitación que ya tiene el resto del visor standalone (leerTrazabilidad_/
-// leerValorizacion_/MESES_ACTIVOS tampoco distinguen año). Si en el futuro
-// se necesita que el visor standalone muestre varios años, hay que revisar
-// esas funciones también, no solo esta.
-function leerCostoIngreso_() {
+// targetAnio: filtra por la columna Año (col. B) — mismo criterio que
+// leerTrazabilidad_/leerValorizacion_/leerObjetivosReales_.
+function leerCostoIngreso_(targetAnio) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName('Costo e Ingreso');
   if (!sheet) return {};
@@ -280,7 +275,8 @@ function leerCostoIngreso_() {
   var result = {}; // empId -> mes -> { residuos:[...], totales:{...} }
   rows.forEach(function (r) {
     var suc = String(r[0] || '').trim();
-    // r[1] = Año (no se usa aquí, ver nota arriba)
+    var anioFila = String(r[1] || '').trim() || String(new Date().getFullYear());
+    if (targetAnio && anioFila !== targetAnio) return;
     var mes = normalizarMes_(r[2]);
     var residuo = String(r[3] || '').trim();
     if (!suc || !mes) return;
@@ -428,7 +424,8 @@ var COMENTARIO_HEADERS_CANDIDATOS = ["Comentario por sucursal", "Comentarios", "
 function doGetVisor_(e) {
   var payload;
   try {
-    payload = buildPayload_();
+    var anioParam = e && e.parameter && e.parameter.anio;
+    payload = buildPayload_(anioParam);
   } catch (err) {
     payload = { error: true, message: String(err) };
   }
@@ -444,16 +441,25 @@ function doGetVisor_(e) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
-function buildPayload_() {
-  var traza = leerTrazabilidad_();
-  var val   = leerValorizacion_();
+// buildPayload_ recibe (opcionalmente) el año pedido por el visor (?anio=2026)
+// y filtra Trazabilidad/Valorización/Objetivos-mensuales/Costo e Ingreso a
+// ESE año exacto — mismo mecanismo ya usado en Code-Vital.gs/Code-Gespania.gs.
+// Las filas "Anual" de Objetivos nunca se filtran por año.
+function buildPayload_(anioParam) {
+  var aniosDisponibles = listarAniosDisponibles_();
+  var anioSeleccionado = (anioParam && aniosDisponibles.indexOf(String(anioParam)) !== -1)
+    ? String(anioParam)
+    : aniosDisponibles[aniosDisponibles.length - 1];
+
+  var traza = leerTrazabilidad_(anioSeleccionado);
+  var val   = leerValorizacion_(anioSeleccionado);
 
   var empIdsValidos = {};
   Object.keys(traza.sucursales).forEach(function (empId) { empIdsValidos[empId] = true; });
 
   var cse   = leerCSE_(empIdsValidos);
-  var costoIngreso = leerCostoIngreso_();
-  var objetivosReales = leerObjetivosReales_();
+  var costoIngreso = leerCostoIngreso_(anioSeleccionado);
+  var objetivosReales = leerObjetivosReales_(anioSeleccionado);
   var empresas = construirEmpresas_(traza, val, cse);
   empresas.forEach(function (e) {
     e.costoIngreso = costoIngreso[e.id] || {};
@@ -470,9 +476,33 @@ function buildPayload_() {
     EMPRESA_COLOR: EMPRESA_COLOR,
     EMPRESA_COLOR_L: EMPRESA_COLOR_L,
     MESES_ACTIVOS: mesesActivos,
+    ANIOS_DISPONIBLES: aniosDisponibles,
+    ANIO_SELECCIONADO: anioSeleccionado,
     EMPRESAS: empresas,
     VAL_DATA: val
   };
+}
+
+// Escanea la columna "Año" de Trazabilidad_Docs/Valorización/Objetivos y
+// devuelve la lista de años con datos, ordenada ascendente. Si ninguna fila
+// tiene Año todavía, devuelve el año actual como única opción.
+function listarAniosDisponibles_() {
+  var anios = {};
+  function escanear(candidatos) {
+    var sr;
+    try { sr = getSheetRows_(candidatos); } catch (err) { return; }
+    var idxAnio = sr.header.indexOf('Año');
+    if (idxAnio === -1) return;
+    sr.rows.forEach(function (r) {
+      var a = String(r[idxAnio] || '').trim();
+      if (a) anios[a] = true;
+    });
+  }
+  escanear(SHEET_TRAZA_CANDIDATOS);
+  escanear(SHEET_VAL_CANDIDATOS);
+  escanear(['🎯 Objetivos', 'Objetivos']);
+  var lista = Object.keys(anios).sort();
+  return lista.length ? lista : [String(new Date().getFullYear())];
 }
 
 // Lee la hoja real "🎯 Objetivos" (empresa_id | Sucursal | Mes | Objetivo |
@@ -482,7 +512,10 @@ function buildPayload_() {
 // visor. La columna "% cumplimiento" puede traer un % ("30,00%"), un Sí/No,
 // o texto libre (ej. "Cert. tratamiento: 2/2 | Factura: 0/2") — se maneja
 // cada caso.
-function leerObjetivosReales_() {
+// targetAnio: filtra las filas MENSUALES a ese año exacto (fila sin Año se
+// asume del año actual). Las filas "Anual" (ej. "segregacion_anual") NUNCA
+// se filtran por año, mismo criterio que Code-Vital.gs/Code-Gespania.gs.
+function leerObjetivosReales_(targetAnio) {
   var sr;
   try {
     sr = getSheetRows_(['🎯 Objetivos', 'Objetivos']);
@@ -492,6 +525,7 @@ function leerObjetivosReales_() {
   var h = sr.header;
   var idxSuc = h.indexOf("Sucursal");
   var idxMes = h.indexOf("Mes");
+  var idxAnio = h.indexOf("Año");
   var idxObj = h.indexOf("Objetivo");
   var idxPct = h.indexOf("% cumplimiento");
   var idxDet = h.indexOf("Detalle");
@@ -513,6 +547,11 @@ function leerObjetivosReales_() {
 
     var empId = normalizarSucursal_(suc);
     var mes = normalizarMes_(r[idxMes]);
+    if (mes.toLowerCase() !== "anual") {
+      var anioFila = idxAnio === -1 ? "" : String(r[idxAnio] || "").trim();
+      if (!anioFila) anioFila = String(new Date().getFullYear());
+      if (targetAnio && anioFila !== targetAnio) return;
+    }
     var mesIdx = MESES.indexOf(mes);
     var rawPct = idxPct === -1 ? "" : r[idxPct];
     var detalle = idxDet === -1 ? "" : String(r[idxDet] || "").trim();
@@ -572,11 +611,14 @@ function getSheetRows_(candidatos) {
   return { header: header, rows: rows };
 }
 
-function leerTrazabilidad_() {
+// targetAnio: si se pasa, filtra las filas a ese año exacto (fila sin Año
+// se asume del año actual, mismo criterio que valorizacion-recylink.html).
+function leerTrazabilidad_(targetAnio) {
   var sr = getSheetRows_(SHEET_TRAZA_CANDIDATOS);
   var h = sr.header;
   var idxSuc = h.indexOf("Sucursal");
   var idxMes = h.indexOf("Mes");
+  var idxAnio = h.indexOf("Año");
   var idxRes = h.indexOf("Residuo");
   var idxImp = h.indexOf("Importaciones");
   var docIdx = DOC_COLS.map(function (c) { return h.lastIndexOf(c); });
@@ -596,6 +638,10 @@ function leerTrazabilidad_() {
     var mes = normalizarMes_(r[idxMes]);
     var residuo = String(r[idxRes] || "").trim();
     if (!mes || !residuo) return;
+
+    var anioFila = idxAnio === -1 ? "" : String(r[idxAnio] || "").trim();
+    if (!anioFila) anioFila = String(new Date().getFullYear());
+    if (targetAnio && anioFila !== targetAnio) return;
 
     sucursales[empId] = suc;
 
@@ -626,11 +672,12 @@ function leerTrazabilidad_() {
   return { sucursales: sucursales, porEmpresaMes: porEmpresaMes, comentarios: comentariosPorEmpresaMes };
 }
 
-function leerValorizacion_() {
+function leerValorizacion_(targetAnio) {
   var sr = getSheetRows_(SHEET_VAL_CANDIDATOS);
   var h = sr.header;
   var idxSuc = h.indexOf("Sucursal");
   var idxTipo = h.indexOf("Tipo");
+  var idxAnio = h.indexOf("Año");
   var mesIdx = MESES.map(function (m) { return h.indexOf(m); });
 
   var valData = {};
@@ -640,6 +687,10 @@ function leerValorizacion_() {
     if (!suc) return;
     var empId = normalizarSucursal_(suc);
     var tipo = String(r[idxTipo] || "").trim().toLowerCase();
+
+    var anioFila = idxAnio === -1 ? "" : String(r[idxAnio] || "").trim();
+    if (!anioFila) anioFila = String(new Date().getFullYear());
+    if (targetAnio && anioFila !== targetAnio) return;
 
     valData[empId] = valData[empId] || { meses: {}, meta: {}, acumulado: {} };
 
