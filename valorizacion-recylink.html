@@ -3684,6 +3684,8 @@ function openObjetivosSucursalEditor() {
   // agrega como una columna mas, al final.
   var objs = (emp.objetivos || []).concat([{nombre: META_VAL_OBJ_NOMBRE}]);
   var dormidos = getObjetivosDormidosUI();
+  var fA = document.getElementById('f-obj-anio').value;
+  var sucursalesDelAnio = sucursalesConDatosEnAnio(fA);
   // white-space:normal explicito porque el selector global "thead th" del
   // CSS de la pagina fuerza white-space:nowrap, que junto con max-width
   // hacia que los nombres largos de objetivo (ej. en Euro) se dibujaran
@@ -3691,7 +3693,7 @@ function openObjetivosSucursalEditor() {
   var thCells = objs.map(function(o){
     return '<th style="position:sticky;top:0;background:var(--surface2);padding:8px 10px;border-bottom:1px solid var(--border);border-left:1px solid var(--border);font-size:11px;color:var(--text-muted);width:150px;white-space:normal;word-break:break-word;line-height:1.4">'+o.nombre+'</th>';
   }).join('');
-  var rows = sucursales.map(function(suc){
+  var rows = sucursalesDelAnio.map(function(suc){
     var dormidosSuc = dormidos[suc] || [];
     var sucAttr = suc.replace(/"/g,'&quot;');
     var cells = objs.map(function(o){
