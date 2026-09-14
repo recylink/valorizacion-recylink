@@ -952,7 +952,13 @@ function resolveMetaEmpresa_(companyId, sucursalesList, metaFromSheet) {
     try { var s2 = localStorage.getItem('acciona_metas'); storedA = s2 ? JSON.parse(s2) : null; } catch(e) { storedA = null; }
     return Object.assign({}, defA, metaFromSheet, storedA || {});
   }
-  // gespania/salfa/euro/ando/socovesa: solo lo que venga del Sheet, sin default fijo.
+  // Socovesa no tiene un % de valorización vs. meta global — trabaja con
+  // objetivos propios por proyecto (trazabilidad, valorizar residuo, respel,
+  // FGR, etc.), no con una meta % de valorización a nivel empresa. A pedido
+  // del usuario, se saca de toda vista (panel de Salud incluido) devolviendo
+  // siempre {} en vez de lo que venga sincronizado en el Sheet.
+  if (companyId === 'socovesa') return {};
+  // gespania/salfa/euro/ando: solo lo que venga del Sheet, sin default fijo.
   return metaFromSheet;
 }
 
@@ -3746,8 +3752,9 @@ function openObjetivosSucursalEditor() {
   var emp = EMPRESAS[empresaActual];
   // El % de valorizacion vs. meta no es un objetivo real de emp.objetivos
   // (no tiene fila propia), pero tambien se puede dormir por sucursal — se
-  // agrega como una columna mas, al final.
-  var objs = (emp.objetivos || []).concat([{nombre: META_VAL_OBJ_NOMBRE}]);
+  // agrega como una columna mas, al final. Socovesa no lo usa (ver
+  // resolveMetaEmpresa_), así que no tiene sentido mostrarlo acá tampoco.
+  var objs = (emp.objetivos || []).concat(empresaActual === 'socovesa' ? [] : [{nombre: META_VAL_OBJ_NOMBRE}]);
   var dormidos = getObjetivosDormidosUI();
   var fA = document.getElementById('f-obj-anio').value;
   var sucursalesDelAnio = sucursalesConDatosEnAnio(fA);
