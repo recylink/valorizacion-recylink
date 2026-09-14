@@ -2871,8 +2871,12 @@ function loadFromSheets() {
   msg.textContent = 'Cargando datos desde Google Sheets...';
   document.getElementById('btn-load-sheets').disabled = true;
 
-  return fetch(emp.scriptUrl, {method:'GET', mode:'cors'})
-    .then(function(r){ return r.json(); })
+  // Reintenta hasta 2 veces (mismo mecanismo que el panel de Salud, ver
+  // fetchJsonConReintento_): los endpoints de Apps Script a veces
+  // responden con una página HTML de error en vez del JSON esperado
+  // (cuota/rate-limit intermitente del lado de Google, no del cliente) —
+  // caso real: "Unexpected token '<', <!DOCTYPE...'" al cargar Euro.
+  return fetchJsonConReintento_(emp.scriptUrl, 3, 1500)
     .then(function(data) {
       if (empresaActual !== empresaAlIniciar) return; // la empresa activa cambió mientras cargaba
       if (!data) throw new Error('Sin datos en el Sheet');
