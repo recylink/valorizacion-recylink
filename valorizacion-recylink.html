@@ -379,7 +379,12 @@ var EMPRESAS = {
   },
   salfa: {
     nombre: 'Salfa',
-    scriptUrl: 'https://script.google.com/macros/s/AKfycbyp5gnnZjhOIpAdTSGn8Nhs0umE_VXbUVTTQLLpjUVRSn2hKy7wFShNUfx_Q8HSI85O/exec',
+    // 2026-09-14: el proyecto de Apps Script original desapareció (el Sheet
+    // real de Salfa seguía intacto, pero el script vinculado a él se perdió).
+    // Se creó un proyecto nuevo desde Extensiones → Apps Script del mismo
+    // Sheet real (mantiene acceso a todo el historial) y se redesplegó — esta
+    // es la URL de esa nueva implementación, reemplaza a la anterior.
+    scriptUrl: 'https://script.google.com/macros/s/AKfycbw0Osd06y9SgWcB6jNPUu0oVTdtK1aCUs0fQkGpBIRQVXqGAsspH3gkj6BpVjHYCG_2uw/exec',
     prefix: 'salfa',
     trazCols: [
       {header:'Sucursal',key:'suc'},{header:'Mes',key:'mes'},{header:'Residuo',key:'residuo'},
