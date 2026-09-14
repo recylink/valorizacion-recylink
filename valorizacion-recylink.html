@@ -1013,6 +1013,26 @@ function calcSaludEmpresa_(companyId, data, anio) {
     var objScores = (emp.objetivos||[]).filter(function(o){
       return !isObjetivoDormido(companyId, suc, o.nombre);
     }).map(function(o){
+      // Objetivos de presencia/valorización de residuos SIEMPRE se calculan
+      // en vivo desde Total Residuos (data.totalResiduos), igual que ya hace
+      // renderCopecObjetivos() para la "vista general" — en vez de usar el
+      // snapshot ya sincronizado en "🎯 Objetivos" (objInfo.objAnualBySuc,
+      // rama de abajo), que puede quedar desactualizado si el residuo se
+      // valorizó/retiró en un mes posterior al último Excel sincronizado.
+      // Sin este bloque, el panel de Salud (izquierda) y la vista general
+      // podían mostrar % distintos para la misma sucursal.
+      if (o.tipo === 'valorizar_residuo' || o.tipo === 'reg_valorizar') {
+        var nombres = Object.values(residuosValorizadosDeSuc_(suc, data.totalResiduos||[], []));
+        return scoreObjSalud_(nombres.length > 0 ? 'OK' : 'No', '');
+      }
+      if (o.tipo === 'respel') {
+        var numRetiros = retirosRespelDeSuc_(suc, data.totalResiduos||[], []);
+        return scoreObjSalud_(numRetiros > 0 ? numRetiros+' retiro'+(numRetiros!==1?'s':'') : 'No', '');
+      }
+      if (o.tipo === 'valorizar_especificos' || o.tipo === 'segregar_especificos') {
+        var rEsp = calcResiduosEspecificosLive_(suc, o.residuos||[], o.tipo==='valorizar_especificos', data.totalResiduos||[], []);
+        return scoreObjSalud_(rEsp.estado, rEsp.detalle);
+      }
       if (OBJ_ANUALES[o.tipo]) {
         var rAnu = objInfo.objAnualBySuc[suc+'|'+o.nombre];
         return rAnu ? scoreObjSalud_(rAnu.estado, rAnu.detalle) : 0;
@@ -2033,15 +2053,22 @@ function kgRealPorMesSuc_(suc) {
 // Devuelve {normResiduo(nombre): nombreOriginal} — el valor guarda el
 // nombre tal cual viene del Sheet (no el normalizado) para poder mostrarlo
 // en el detalle (ej. "Fierro", no "fierro").
-function residuosValorizadosDeSuc_(suc) {
+// totalResiduosArr/sessionRowsArr son opcionales: por defecto usan las
+// globales de la empresa/sesión activa (totalResiduosDesdeSheets/
+// totalResiduosRows), pero calcSaludEmpresa_() los pasa explícitamente
+// (data.totalResiduos, []) para poder calcular la salud de OTRA empresa
+// (no la activa en el visor) a partir de su propio payload ya descargado.
+function residuosValorizadosDeSuc_(suc, totalResiduosArr, sessionRowsArr) {
+  if (totalResiduosArr === undefined) totalResiduosArr = totalResiduosDesdeSheets;
+  if (sessionRowsArr === undefined) sessionRowsArr = totalResiduosRows;
   var set = {};
-  totalResiduosDesdeSheets.forEach(function(r){
+  totalResiduosArr.forEach(function(r){
     if (((r['Sucursal']||'')+'') !== suc) return;
     if (((r['Valorizado/No Valorizado']||'')+'').trim() !== 'Valorizado') return;
     var nombre = (r['Residuo']||'')+'';
     if (nombre) set[normResiduo(nombre)] = nombre;
   });
-  totalResiduosRows.forEach(function(r){
+  sessionRowsArr.forEach(function(r){
     if (r.suc !== suc || !r.valorizado) return;
     if (r.residuo) set[normResiduo(r.residuo)] = r.residuo;
   });
@@ -2050,14 +2077,16 @@ function residuosValorizadosDeSuc_(suc) {
 // Igual que arriba pero sin exigir "Valorizado" — solo que el residuo se
 // haya registrado alguna vez (usado por segregar_especificos, que mide
 // presencia/segregación, no valorización).
-function residuosPresentesDeSuc_(suc) {
+function residuosPresentesDeSuc_(suc, totalResiduosArr, sessionRowsArr) {
+  if (totalResiduosArr === undefined) totalResiduosArr = totalResiduosDesdeSheets;
+  if (sessionRowsArr === undefined) sessionRowsArr = totalResiduosRows;
   var set = {};
-  totalResiduosDesdeSheets.forEach(function(r){
+  totalResiduosArr.forEach(function(r){
     if (((r['Sucursal']||'')+'') !== suc) return;
     var nombre = (r['Residuo']||'')+'';
     if (nombre) set[normResiduo(nombre)] = nombre;
   });
-  totalResiduosRows.forEach(function(r){
+  sessionRowsArr.forEach(function(r){
     if (r.suc !== suc) return;
     if (r.residuo) set[normResiduo(r.residuo)] = r.residuo;
   });
@@ -2073,9 +2102,11 @@ function residuosPresentesDeSuc_(suc) {
 // (mismo motivo por el que se corrigió valorizar_residuo/reg_valorizar).
 // Cuenta por Mes+Residuo (no solo por Residuo) porque acá sí importa el
 // número de retiros, no solo si "alguna vez" se retiró.
-function retirosRespelDeSuc_(suc) {
+function retirosRespelDeSuc_(suc, totalResiduosArr, sessionRowsArr) {
+  if (totalResiduosArr === undefined) totalResiduosArr = totalResiduosDesdeSheets;
+  if (sessionRowsArr === undefined) sessionRowsArr = totalResiduosRows;
   var set = {};
-  totalResiduosDesdeSheets.forEach(function(r){
+  totalResiduosArr.forEach(function(r){
     if (((r['Sucursal']||'')+'') !== suc) return;
     if (!isRespel(r['Residuo'])) return;
     var anio = (r['Año']||'')+'';
@@ -2085,7 +2116,7 @@ function retirosRespelDeSuc_(suc) {
     var mesKey = (anio && idxMes !== null) ? (anio + '-' + String(idxMes).padStart(2,'0')) : mesLabel;
     set[mesKey + '|' + normResiduo(r['Residuo'])] = true;
   });
-  totalResiduosRows.forEach(function(r){
+  sessionRowsArr.forEach(function(r){
     if (r.suc !== suc || !r.respel) return;
     set[r.mes + '|' + normResiduo(r.residuo)] = true;
   });
@@ -2097,8 +2128,8 @@ function retirosRespelDeSuc_(suc) {
 // depender de rawRows (solo existe si se subió un Excel esta sesión) o del
 // snapshot sincronizado. exigirValorizado=true para "valorizar_"
 // (valorizado obligatorio), false para "segregar_" (solo presencia).
-function calcResiduosEspecificosLive_(suc, residuosReq, exigirValorizado) {
-  var set = exigirValorizado ? residuosValorizadosDeSuc_(suc) : residuosPresentesDeSuc_(suc);
+function calcResiduosEspecificosLive_(suc, residuosReq, exigirValorizado, totalResiduosArr, sessionRowsArr) {
+  var set = exigirValorizado ? residuosValorizadosDeSuc_(suc, totalResiduosArr, sessionRowsArr) : residuosPresentesDeSuc_(suc, totalResiduosArr, sessionRowsArr);
   var logrados = [], faltantes = [];
   residuosReq.forEach(function(r){
     (set[normResiduo(r)] ? logrados : faltantes).push(r);
