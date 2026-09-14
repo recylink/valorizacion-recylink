@@ -1100,13 +1100,33 @@ function refreshSaludAnioOptions_() {
   }
 }
 
+// Los endpoints de Apps Script (/exec) a veces responden de forma
+// intermitente con una pagina HTML de error en vez del JSON esperado
+// (cuota/rate-limit del lado de Google, no del cliente) — confirmado
+// repitiendo la misma consulta varias veces seguidas (2026-09-14). Como el
+// panel de salud pide las 11 empresas en paralelo apenas se carga la
+// pagina, bastaba con que Google tuviera un mal momento para que varias
+// (o todas) quedaran marcadas "Error" a la vez, aunque el fallo fuera
+// transitorio y se resolviera solo en un par de segundos. Se reintenta
+// hasta 2 veces (3 intentos en total) con una espera breve entre cada uno
+// antes de darla por caida — el catch cubre tanto el fetch() como el
+// r.json() (una respuesta HTML con status 200 igual rompe el parseo).
+function fetchJsonConReintento_(url, intentosRestantes, delayMs) {
+  return fetch(url, {method:'GET', mode:'cors'})
+    .then(function(r){ return r.json(); })
+    .catch(function(err){
+      if (intentosRestantes <= 1) throw err;
+      return new Promise(function(resolve){ setTimeout(resolve, delayMs); })
+        .then(function(){ return fetchJsonConReintento_(url, intentosRestantes - 1, delayMs); });
+    });
+}
+
 function cargarSaludTodas() {
   saludCargando = true;
   renderSaludPanel();
   var ids = Object.keys(EMPRESAS);
   return Promise.all(ids.map(function(id){
-    return fetch(EMPRESAS[id].scriptUrl, {method:'GET', mode:'cors'})
-      .then(function(r){ return r.json(); })
+    return fetchJsonConReintento_(EMPRESAS[id].scriptUrl, 3, 1500)
       .then(function(data){
         data = data || {};
         saludDataPorEmpresa[id] = data;
