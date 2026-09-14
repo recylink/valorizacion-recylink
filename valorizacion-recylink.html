@@ -2380,7 +2380,15 @@ function calcObjetivos(anio) {
         estado=tiene?'OK':'No';
         detalle=tiene?'':'No hay residuos con tratamiento valorizable registrados';
       } else if(obj.tipo==='respel'){
-        var respelRows=rowsSuc.filter(function(r){return (r['Residuo']+'').toLowerCase().indexOf('respel')>=0;});
+        // FIX (caso real: "Pataguas 12" mostraba "No se registraron retiros
+        // de Respel" pese a tener un retiro real en Junio): esto buscaba el
+        // texto literal "respel" DENTRO DEL NOMBRE del residuo (ej. "Residuo
+        // Respel X"), en vez de usar la clasificación real de la hoja
+        // RESPEL (isRespel()/respelSet, ya usada en el resto de la app para
+        // excluir Respel del % de valorización) — un residuo real como
+        // "Baterías de plomo" o "Aerosoles" nunca iba a matchear ese texto
+        // literal, aunque esté marcado RESPEL=TRUE en la hoja.
+        var respelRows=rowsSuc.filter(function(r){return isRespel(r['Residuo']);});
         estado=respelRows.length>0?respelRows.length+' retiro'+(respelRows.length!==1?'s':''):'No';
         detalle=respelRows.length===0?'No se registraron retiros de Respel':'';
       } else if(obj.tipo==='valorizar_especificos'){
