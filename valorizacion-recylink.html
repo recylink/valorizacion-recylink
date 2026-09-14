@@ -1032,19 +1032,25 @@ function calcSaludEmpresa_(companyId, data, anio) {
       // valorizó/retiró en un mes posterior al último Excel sincronizado.
       // Sin este bloque, el panel de Salud (izquierda) y la vista general
       // podían mostrar % distintos para la misma sucursal.
-      if (o.tipo === 'valorizar_residuo' || o.tipo === 'reg_valorizar') {
+      // OJO: esto solo se aplica si Total Residuos REALMENTE tiene alguna
+      // fila para esta sucursal (sucTieneTotalResiduos_) — si esa hoja nunca
+      // se sincronizó para esta sucursal (empresa/obra que no usa esa pestaña
+      // en la práctica, ver caso real Salfa/Inoval 2026-09-14), no hay que
+      // asumir "No cumplido": eso sería peor que el snapshot ya sincronizado,
+      // que si venía de un Excel real. En ese caso se cae al fallback de abajo.
+      if ((o.tipo === 'valorizar_residuo' || o.tipo === 'reg_valorizar') && sucTieneTotalResiduos_(suc, data.totalResiduos||[], [])) {
         var nombres = Object.values(residuosValorizadosDeSuc_(suc, data.totalResiduos||[], []));
         return scoreObjSalud_(nombres.length > 0 ? 'OK' : 'No', '');
       }
-      if (o.tipo === 'respel') {
+      if (o.tipo === 'respel' && sucTieneTotalResiduos_(suc, data.totalResiduos||[], [])) {
         var numRetiros = retirosRespelDeSuc_(suc, data.totalResiduos||[], []);
         return scoreObjSalud_(numRetiros > 0 ? numRetiros+' retiro'+(numRetiros!==1?'s':'') : 'No', '');
       }
-      if (o.tipo === 'valorizar_especificos' || o.tipo === 'segregar_especificos') {
+      if ((o.tipo === 'valorizar_especificos' || o.tipo === 'segregar_especificos') && sucTieneTotalResiduos_(suc, data.totalResiduos||[], [])) {
         var rEsp = calcResiduosEspecificosLive_(suc, o.residuos||[], o.tipo==='valorizar_especificos', data.totalResiduos||[], []);
         return scoreObjSalud_(rEsp.estado, rEsp.detalle);
       }
-      if (o.tipo === 'segregacion_anual') {
+      if (o.tipo === 'segregacion_anual' && sucTieneTotalResiduos_(suc, data.totalResiduos||[], [])) {
         var rSeg = calcSegregacionAnualLive_(suc, anio, data.totalResiduos||[], []);
         return scoreObjSalud_(rSeg.estado, rSeg.detalle);
       }
@@ -2068,6 +2074,22 @@ function kgRealPorMesSuc_(suc) {
 // Devuelve {normResiduo(nombre): nombreOriginal} — el valor guarda el
 // nombre tal cual viene del Sheet (no el normalizado) para poder mostrarlo
 // en el detalle (ej. "Fierro", no "fierro").
+// true si Total Residuos tiene AL MENOS UNA fila para esta sucursal (Sheets
+// + sesión), sin importar residuo/valorizado — usado como guarda antes de
+// confiar en el cálculo en vivo de más abajo (residuosValorizadosDeSuc_ y
+// cia.). Caso real (Salfa/Inoval, 2026-09-14): "Asegurar una correcta
+// segregación de residuos" se veía "No cumplido" pese a que el Excel de esa
+// obra sí tenía residuos distintos de Escombro — la hoja "Total Residuos" de
+// Salfa nunca se sincronizó de verdad para esa obra (0 filas), así que el
+// cálculo en vivo no tenía nada de donde partir. Sin esta guarda, "0 filas"
+// se interpretaba como "0 residuos válidos" (falso "No") en vez de "no hay
+// dato confiable, usar el snapshot ya sincronizado como antes".
+function sucTieneTotalResiduos_(suc, totalResiduosArr, sessionRowsArr) {
+  if (totalResiduosArr === undefined) totalResiduosArr = totalResiduosDesdeSheets;
+  if (sessionRowsArr === undefined) sessionRowsArr = totalResiduosRows;
+  return totalResiduosArr.some(function(r){ return ((r['Sucursal']||'')+'') === suc; })
+    || sessionRowsArr.some(function(r){ return r.suc === suc; });
+}
 // totalResiduosArr/sessionRowsArr son opcionales: por defecto usan las
 // globales de la empresa/sesión activa (totalResiduosDesdeSheets/
 // totalResiduosRows), pero calcSaludEmpresa_() los pasa explícitamente
@@ -2599,14 +2621,29 @@ function calcObjetivos(anio) {
         estado=mesesVisita.length>0?'OK':'No';
         detalle=mesesVisita.length>0?mesesVisita.join(', '):'No se registraron '+(cseKeyChk==='charla'?'charlas':'visitas a terreno');
       } else if(obj.tipo==='segregacion_anual'){
-        // FIX (mismo caso que valorizar_residuo/reg_valorizar/respel arriba):
-        // usa Total Residuos (calcSegregacionAnualLive_) en vez de rowsSuc
-        // (solo ve el Excel de ESTA sesión) — así un residuo distinto ya
-        // registrado en un mes anterior del mismo año sigue contando, aunque
-        // el Excel de hoy no lo incluya. A diferencia de esos otros, este SÍ
-        // se acota por año (no es un logro permanente).
-        var rSeg=calcSegregacionAnualLive_(suc, anio);
-        estado=rSeg.estado; detalle=rSeg.detalle;
+        if (sucTieneTotalResiduos_(suc)) {
+          // FIX (mismo caso que valorizar_residuo/reg_valorizar/respel
+          // arriba): usa Total Residuos (calcSegregacionAnualLive_) en vez de
+          // rowsSuc (solo ve el Excel de ESTA sesión) — así un residuo
+          // distinto ya registrado en un mes anterior del mismo año sigue
+          // contando, aunque el Excel de hoy no lo incluya. A diferencia de
+          // esos otros, este SÍ se acota por año (no es un logro permanente).
+          var rSeg=calcSegregacionAnualLive_(suc, anio);
+          estado=rSeg.estado; detalle=rSeg.detalle;
+        } else {
+          // Total Residuos nunca se sincronizó para esta sucursal (caso real:
+          // Salfa/Inoval, 2026-09-14) — cae al cálculo original directo desde
+          // el Excel de esta sesión, en vez de asumir "No cumplido" solo
+          // porque no hay nada en Total Residuos.
+          var genericosSeg={escombro:1,excavacion:1,domiciliario:1,domiciliarios:1};
+          var otrosResAnual=[];
+          rowsSuc.forEach(function(r){
+            var keySeg=normResiduo(r['Residuo']);
+            if(keySeg && !genericosSeg[keySeg] && otrosResAnual.indexOf(r['Residuo'])<0) otrosResAnual.push(r['Residuo']);
+          });
+          estado=otrosResAnual.length>0?'OK':'No';
+          detalle=otrosResAnual.length>0?otrosResAnual.join(', '):'Solo Escombro/Excavación/Domiciliario registrados este año';
+        }
       }
       // tipo:'manual_anual' (ej. "Contactar Nuevos proveedores") nunca
       // calcula un estado aca — se ingresa a mano en la fila "Anual" de
@@ -3419,15 +3456,22 @@ function renderCopecObjetivos() {
   // porque el último Excel subido no incluía ese mes todavía. Total
   // Residuos siempre refleja el estado real, sin depender de cuándo se
   // sincronizó "🎯 Objetivos" por última vez ni de si HOY se subió un Excel.
+  // sucTieneTotalResiduos_ evita confiar en el cálculo en vivo cuando esa
+  // hoja simplemente nunca se sincronizó para una sucursal puntual — en ese
+  // caso se deja lo que ya haya en objAnualBySuc (calcObjetivos()/snapshot
+  // sincronizado) en vez de forzar un "No" que no refleja el Excel real.
+  // Caso real (Salfa/Inoval, 2026-09-14): ver comentario en sucTieneTotalResiduos_.
   (emp.objetivos || []).forEach(function(o){
     if (o.tipo === 'valorizar_especificos' || o.tipo === 'segregar_especificos') {
       var exigirValorizado = o.tipo === 'valorizar_especificos';
       sucursales.forEach(function(suc){
+        if (!sucTieneTotalResiduos_(suc)) return;
         var r = calcResiduosEspecificosLive_(suc, o.residuos || [], exigirValorizado);
         objAnualBySuc[suc + '|' + o.nombre] = {suc:suc, mes:'Anual', mesKey:'anual', obj:o.nombre, estado:r.estado, detalle:r.detalle, anual:true};
       });
     } else if (o.tipo === 'valorizar_residuo' || o.tipo === 'reg_valorizar') {
       sucursales.forEach(function(suc){
+        if (!sucTieneTotalResiduos_(suc)) return;
         var nombres = Object.values(residuosValorizadosDeSuc_(suc));
         var estado = nombres.length > 0 ? 'OK' : 'No';
         var detalle = o.tipo === 'reg_valorizar'
@@ -3437,6 +3481,7 @@ function renderCopecObjetivos() {
       });
     } else if (o.tipo === 'respel') {
       sucursales.forEach(function(suc){
+        if (!sucTieneTotalResiduos_(suc)) return;
         var numRetiros = retirosRespelDeSuc_(suc);
         var estado = numRetiros > 0 ? numRetiros+' retiro'+(numRetiros!==1?'s':'') : 'No';
         var detalle = numRetiros === 0 ? 'No se registraron retiros de Respel' : '';
@@ -3444,6 +3489,7 @@ function renderCopecObjetivos() {
       });
     } else if (o.tipo === 'segregacion_anual') {
       sucursales.forEach(function(suc){
+        if (!sucTieneTotalResiduos_(suc)) return;
         var rSeg = calcSegregacionAnualLive_(suc, fA);
         objAnualBySuc[suc + '|' + o.nombre] = {suc:suc, mes:'Anual', mesKey:'anual', obj:o.nombre, estado:rSeg.estado, detalle:rSeg.detalle, anual:true};
       });
