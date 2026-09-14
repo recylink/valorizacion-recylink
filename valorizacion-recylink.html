@@ -2020,6 +2020,68 @@ function kgRealPorMesSuc_(suc) {
   return porMes;
 }
 
+// Residuos (normalizados) con al menos una fila "Valorizado" en Total
+// Residuos para esta sucursal — Sheets + sesión actual combinados, misma
+// fuente ya usada por kgRealPorMesSuc_ arriba. Caso real (2026-09-14):
+// Amengual (Euro) mostraba "Falta: Fierro" en "Valorizar fierro, madera,
+// cartón" pese a que Fierro SÍ está marcado "Valorizado" en Total Residuos
+// desde Mayo — el objetivo venía del snapshot ya sincronizado en
+// "🎯 Objetivos" (calculado la última vez que se subió un Excel), que
+// quedó desactualizado porque ese Excel no incluía el mes de Mayo
+// todavía. Total Residuos, en cambio, siempre refleja el estado real
+// (se actualiza con cada Excel/sync, sin depender de si HOY se subió uno).
+// Devuelve {normResiduo(nombre): nombreOriginal} — el valor guarda el
+// nombre tal cual viene del Sheet (no el normalizado) para poder mostrarlo
+// en el detalle (ej. "Fierro", no "fierro").
+function residuosValorizadosDeSuc_(suc) {
+  var set = {};
+  totalResiduosDesdeSheets.forEach(function(r){
+    if (((r['Sucursal']||'')+'') !== suc) return;
+    if (((r['Valorizado/No Valorizado']||'')+'').trim() !== 'Valorizado') return;
+    var nombre = (r['Residuo']||'')+'';
+    if (nombre) set[normResiduo(nombre)] = nombre;
+  });
+  totalResiduosRows.forEach(function(r){
+    if (r.suc !== suc || !r.valorizado) return;
+    if (r.residuo) set[normResiduo(r.residuo)] = r.residuo;
+  });
+  return set;
+}
+// Igual que arriba pero sin exigir "Valorizado" — solo que el residuo se
+// haya registrado alguna vez (usado por segregar_especificos, que mide
+// presencia/segregación, no valorización).
+function residuosPresentesDeSuc_(suc) {
+  var set = {};
+  totalResiduosDesdeSheets.forEach(function(r){
+    if (((r['Sucursal']||'')+'') !== suc) return;
+    var nombre = (r['Residuo']||'')+'';
+    if (nombre) set[normResiduo(nombre)] = nombre;
+  });
+  totalResiduosRows.forEach(function(r){
+    if (r.suc !== suc) return;
+    if (r.residuo) set[normResiduo(r.residuo)] = r.residuo;
+  });
+  return set;
+}
+// Arma {estado, detalle} para un objetivo "valorizar_especificos"/
+// "segregar_especificos" a partir de los residuos ya presentes/valorizados
+// (ver residuosValorizadosDeSuc_/residuosPresentesDeSuc_), en vez de
+// depender de rawRows (solo existe si se subió un Excel esta sesión) o del
+// snapshot sincronizado. exigirValorizado=true para "valorizar_"
+// (valorizado obligatorio), false para "segregar_" (solo presencia).
+function calcResiduosEspecificosLive_(suc, residuosReq, exigirValorizado) {
+  var set = exigirValorizado ? residuosValorizadosDeSuc_(suc) : residuosPresentesDeSuc_(suc);
+  var logrados = [], faltantes = [];
+  residuosReq.forEach(function(r){
+    (set[normResiduo(r)] ? logrados : faltantes).push(r);
+  });
+  var pct = residuosReq.length > 0 ? (logrados.length / residuosReq.length * 100) : 0;
+  var partes = [];
+  if (logrados.length > 0) partes.push('<span style="color:var(--green)">✓ ' + logrados.join(', ') + '</span>');
+  if (faltantes.length > 0) partes.push('Falta: ' + faltantes.join(', '));
+  return { estado: fmtPct(pct), detalle: partes.join(' · ') };
+}
+
 // % Acumulado (Enero → upTo) ponderado por kg/m3 real, en vez del "cada mes
 // cuenta como 100 unidades" que usa el fallback de más abajo para meses sin
 // esta información. Devuelve null si no hay ningún dato real disponible
@@ -2371,12 +2433,16 @@ function calcObjetivos(anio) {
       if(!OBJ_ANUALES[obj.tipo])return;
       var estado='',detalle='';
       if(obj.tipo==='valorizar_residuo'){
-        var res=[];
-        rowsSuc.forEach(function(r){if(isValorizado(r['Tipo de Tratamiento'])){var rv=r['Residuo'];if(rv&&res.indexOf(rv)<0)res.push(rv);}});
+        // FIX (mismo caso que "Valorizar fierro, madera, cartón" en Euro):
+        // usa Total Residuos (residuosValorizadosDeSuc_) en vez de rowsSuc
+        // (solo ve el Excel de ESTA sesión) — así un residuo valorizado en
+        // un mes anterior, ya sincronizado a Total Residuos pero no incluido
+        // en el Excel de hoy, sigue contando.
+        var res=Object.values(residuosValorizadosDeSuc_(suc));
         estado=res.length>0?'OK':'No';
         detalle=res.length>0?res.join(', '):'No se encontraron residuos valorizados';
       } else if(obj.tipo==='reg_valorizar'){
-        var tiene=rowsSuc.some(function(r){return isValorizado(r['Tipo de Tratamiento']);});
+        var tiene=Object.keys(residuosValorizadosDeSuc_(suc)).length>0;
         estado=tiene?'OK':'No';
         detalle=tiene?'':'No hay residuos con tratamiento valorizable registrados';
       } else if(obj.tipo==='respel'){
@@ -2392,39 +2458,20 @@ function calcObjetivos(anio) {
         estado=respelRows.length>0?respelRows.length+' retiro'+(respelRows.length!==1?'s':''):'No';
         detalle=respelRows.length===0?'No se registraron retiros de Respel':'';
       } else if(obj.tipo==='valorizar_especificos'){
-        // Progreso acumulado anual: cada residuo requerido que se haya valorizado
-        // al menos una vez suma 1/N al avance (ej. Euro: Fierro+Madera+Cartón).
-        var reqs=obj.residuos||[];
-        var logrados=[],faltantes=[];
-        reqs.forEach(function(resReq){
-          var keyReq=normResiduo(resReq);
-          var tiene=rowsSuc.some(function(r){return isValorizado(r['Tipo de Tratamiento'])&&normResiduo(r['Residuo'])===keyReq;});
-          if(tiene)logrados.push(resReq);else faltantes.push(resReq);
-        });
-        var pctV=reqs.length>0?(logrados.length/reqs.length*100):0;
-        estado=fmtPct(pctV);
-        var partsV=[];
-        if(logrados.length>0)partsV.push('<span style="color:var(--green)">✓ '+logrados.join(', ')+'</span>');
-        if(faltantes.length>0)partsV.push('Falta: '+faltantes.join(', '));
-        detalle=partsV.join(' · ');
+        // FIX (caso real 2026-09-14: Amengual mostraba "Falta: Fierro" pese
+        // a que Fierro está Valorizado en Total Residuos desde Mayo) — usa
+        // residuosValorizadosDeSuc_ (Total Residuos: Sheets + sesión) en vez
+        // de rowsSuc (solo ve el Excel de ESTA sesión), mismo motivo que
+        // valorizar_residuo/reg_valorizar arriba.
+        var rV=calcResiduosEspecificosLive_(suc, obj.residuos||[], true);
+        estado=rV.estado; detalle=rV.detalle;
       } else if(obj.tipo==='segregar_especificos'){
         // Igual que 'valorizar_especificos' pero por PRESENCIA del residuo
         // (que se haya registrado ese residuo, sin importar si además se
         // valorizó) — para objetivos de "segregar" en vez de "valorizar"
         // (ej. Vital: Escombro+Cartón+Madera).
-        var reqsSeg=obj.residuos||[];
-        var logradosSeg=[],faltantesSeg=[];
-        reqsSeg.forEach(function(resReq){
-          var keyReq=normResiduo(resReq);
-          var tiene=rowsSuc.some(function(r){return normResiduo(r['Residuo'])===keyReq;});
-          if(tiene)logradosSeg.push(resReq);else faltantesSeg.push(resReq);
-        });
-        var pctSeg=reqsSeg.length>0?(logradosSeg.length/reqsSeg.length*100):0;
-        estado=fmtPct(pctSeg);
-        var partsSeg=[];
-        if(logradosSeg.length>0)partsSeg.push('<span style="color:var(--green)">✓ '+logradosSeg.join(', ')+'</span>');
-        if(faltantesSeg.length>0)partsSeg.push('Falta: '+faltantesSeg.join(', '));
-        detalle=partsSeg.join(' · ');
+        var rS=calcResiduosEspecificosLive_(suc, obj.residuos||[], false);
+        estado=rS.estado; detalle=rS.detalle;
       } else if(obj.tipo==='acompanamiento_anual'){
         // Euro: OK si hubo al menos una "Visita a terreno" (SI) en el año,
         // detalle lista los meses exactos en que se realizó. Mismo mecanismo
@@ -3247,6 +3294,36 @@ function renderCopecObjetivos() {
     Object.assign(objAnualBySuc, parsedObj.objAnualBySuc);
     Object.assign(objBySucMes, parsedObj.objBySucMes);
   }
+
+  // Objetivos de presencia/valorización de residuos SIEMPRE se recalculan
+  // en vivo desde Total Residuos (ver residuosValorizadosDeSuc_/
+  // calcResiduosEspecificosLive_), en vez de usar lo que calcObjetivos()
+  // (necesita un Excel recién subido) o el snapshot ya sincronizado en
+  // "🎯 Objetivos" (parseObjetivosRows_ arriba) hayan calculado. Caso real
+  // (2026-09-14): Amengual (Euro) mostraba "Falta: Fierro" en "Valorizar
+  // fierro, madera, cartón" pese a que Fierro está "Valorizado" en Total
+  // Residuos desde Mayo — el snapshot sincronizado quedó desactualizado
+  // porque el último Excel subido no incluía ese mes todavía. Total
+  // Residuos siempre refleja el estado real, sin depender de cuándo se
+  // sincronizó "🎯 Objetivos" por última vez ni de si HOY se subió un Excel.
+  (emp.objetivos || []).forEach(function(o){
+    if (o.tipo === 'valorizar_especificos' || o.tipo === 'segregar_especificos') {
+      var exigirValorizado = o.tipo === 'valorizar_especificos';
+      sucursales.forEach(function(suc){
+        var r = calcResiduosEspecificosLive_(suc, o.residuos || [], exigirValorizado);
+        objAnualBySuc[suc + '|' + o.nombre] = {suc:suc, mes:'Anual', mesKey:'anual', obj:o.nombre, estado:r.estado, detalle:r.detalle, anual:true};
+      });
+    } else if (o.tipo === 'valorizar_residuo' || o.tipo === 'reg_valorizar') {
+      sucursales.forEach(function(suc){
+        var nombres = Object.values(residuosValorizadosDeSuc_(suc));
+        var estado = nombres.length > 0 ? 'OK' : 'No';
+        var detalle = o.tipo === 'reg_valorizar'
+          ? (nombres.length > 0 ? '' : 'No hay residuos con tratamiento valorizable registrados')
+          : (nombres.length > 0 ? nombres.join(', ') : 'No se encontraron residuos valorizados');
+        objAnualBySuc[suc + '|' + o.nombre] = {suc:suc, mes:'Anual', mesKey:'anual', obj:o.nombre, estado:estado, detalle:detalle, anual:true};
+      });
+    }
+  });
 
   // Ediciones manuales hechas desde el visor en esta sesion (ver
   // "Editar objetivo manual") siempre ganan por sobre lo anterior — si hay
