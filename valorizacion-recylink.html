@@ -2063,6 +2063,34 @@ function residuosPresentesDeSuc_(suc) {
   });
   return set;
 }
+// Cantidad de retiros de Respel (residuos clasificados RESPEL, ver isRespel())
+// para esta sucursal — Sheets + sesión actual combinados, mismo criterio que
+// residuosValorizadosDeSuc_/residuosPresentesDeSuc_ arriba. Antes "Registrar
+// retiros de Respel" solo miraba rowsSuc (el Excel de ESTA sesión dentro de
+// calcObjetivos()), así que subir un Excel de un solo mes sin ningún RESPEL
+// en ese mes hacía aparecer "No se registraron retiros de Respel" pese a
+// haber retiros reales en meses anteriores ya sincronizados a Total Residuos
+// (mismo motivo por el que se corrigió valorizar_residuo/reg_valorizar).
+// Cuenta por Mes+Residuo (no solo por Residuo) porque acá sí importa el
+// número de retiros, no solo si "alguna vez" se retiró.
+function retirosRespelDeSuc_(suc) {
+  var set = {};
+  totalResiduosDesdeSheets.forEach(function(r){
+    if (((r['Sucursal']||'')+'') !== suc) return;
+    if (!isRespel(r['Residuo'])) return;
+    var anio = (r['Año']||'')+'';
+    var mesLabel = (r['Mes']||'')+'';
+    var idxMes = null;
+    Object.keys(MESES_ES).forEach(function(k){ if (MESES_ES[k] === mesLabel) idxMes = k; });
+    var mesKey = (anio && idxMes !== null) ? (anio + '-' + String(idxMes).padStart(2,'0')) : mesLabel;
+    set[mesKey + '|' + normResiduo(r['Residuo'])] = true;
+  });
+  totalResiduosRows.forEach(function(r){
+    if (r.suc !== suc || !r.respel) return;
+    set[r.mes + '|' + normResiduo(r.residuo)] = true;
+  });
+  return Object.keys(set).length;
+}
 // Arma {estado, detalle} para un objetivo "valorizar_especificos"/
 // "segregar_especificos" a partir de los residuos ya presentes/valorizados
 // (ver residuosValorizadosDeSuc_/residuosPresentesDeSuc_), en vez de
@@ -2446,17 +2474,16 @@ function calcObjetivos(anio) {
         estado=tiene?'OK':'No';
         detalle=tiene?'':'No hay residuos con tratamiento valorizable registrados';
       } else if(obj.tipo==='respel'){
-        // FIX (caso real: "Pataguas 12" mostraba "No se registraron retiros
-        // de Respel" pese a tener un retiro real en Junio): esto buscaba el
-        // texto literal "respel" DENTRO DEL NOMBRE del residuo (ej. "Residuo
-        // Respel X"), en vez de usar la clasificación real de la hoja
-        // RESPEL (isRespel()/respelSet, ya usada en el resto de la app para
-        // excluir Respel del % de valorización) — un residuo real como
-        // "Baterías de plomo" o "Aerosoles" nunca iba a matchear ese texto
-        // literal, aunque esté marcado RESPEL=TRUE en la hoja.
-        var respelRows=rowsSuc.filter(function(r){return isRespel(r['Residuo']);});
-        estado=respelRows.length>0?respelRows.length+' retiro'+(respelRows.length!==1?'s':''):'No';
-        detalle=respelRows.length===0?'No se registraron retiros de Respel':'';
+        // FIX (mismo caso que valorizar_residuo/reg_valorizar arriba): usa
+        // Total Residuos (retirosRespelDeSuc_) en vez de rowsSuc (solo ve el
+        // Excel de ESTA sesión) — así un retiro de Respel de un mes anterior,
+        // ya sincronizado a Total Residuos pero no incluido en el Excel de
+        // hoy, sigue contando. Antes de esto ya se había corregido que
+        // buscaba el texto literal "respel" en vez de isRespel() (caso real
+        // "Pataguas 12"), pero seguía limitado al Excel de la sesión.
+        var numRetiros=retirosRespelDeSuc_(suc);
+        estado=numRetiros>0?numRetiros+' retiro'+(numRetiros!==1?'s':''):'No';
+        detalle=numRetiros===0?'No se registraron retiros de Respel':'';
       } else if(obj.tipo==='valorizar_especificos'){
         // FIX (caso real 2026-09-14: Amengual mostraba "Falta: Fierro" pese
         // a que Fierro está Valorizado en Total Residuos desde Mayo) — usa
@@ -3324,6 +3351,13 @@ function renderCopecObjetivos() {
         var detalle = o.tipo === 'reg_valorizar'
           ? (nombres.length > 0 ? '' : 'No hay residuos con tratamiento valorizable registrados')
           : (nombres.length > 0 ? nombres.join(', ') : 'No se encontraron residuos valorizados');
+        objAnualBySuc[suc + '|' + o.nombre] = {suc:suc, mes:'Anual', mesKey:'anual', obj:o.nombre, estado:estado, detalle:detalle, anual:true};
+      });
+    } else if (o.tipo === 'respel') {
+      sucursales.forEach(function(suc){
+        var numRetiros = retirosRespelDeSuc_(suc);
+        var estado = numRetiros > 0 ? numRetiros+' retiro'+(numRetiros!==1?'s':'') : 'No';
+        var detalle = numRetiros === 0 ? 'No se registraron retiros de Respel' : '';
         objAnualBySuc[suc + '|' + o.nombre] = {suc:suc, mes:'Anual', mesKey:'anual', obj:o.nombre, estado:estado, detalle:detalle, anual:true};
       });
     }
