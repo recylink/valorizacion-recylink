@@ -1039,6 +1039,10 @@ function calcSaludEmpresa_(companyId, data, anio) {
         var rEsp = calcResiduosEspecificosLive_(suc, o.residuos||[], o.tipo==='valorizar_especificos', data.totalResiduos||[], []);
         return scoreObjSalud_(rEsp.estado, rEsp.detalle);
       }
+      if (o.tipo === 'segregacion_anual') {
+        var rSeg = calcSegregacionAnualLive_(suc, anio, data.totalResiduos||[], []);
+        return scoreObjSalud_(rSeg.estado, rSeg.detalle);
+      }
       if (OBJ_ANUALES[o.tipo]) {
         var rAnu = objInfo.objAnualBySuc[suc+'|'+o.nombre];
         return rAnu ? scoreObjSalud_(rAnu.estado, rAnu.detalle) : 0;
@@ -2098,6 +2102,44 @@ function residuosPresentesDeSuc_(suc, totalResiduosArr, sessionRowsArr) {
   });
   return set;
 }
+// Igual que residuosPresentesDeSuc_ pero acotado a un año específico — a
+// diferencia de los demás objetivos de residuos (logros permanentes, "¿se
+// hizo ALGUNA VEZ?"), 'segregacion_anual' (Salfa) se evalúa año por año
+// ("¿hubo algún residuo no genérico ESTE año?"), así que no puede usar el
+// set sin acotar.
+function residuosPresentesDeSucAnio_(suc, anio, totalResiduosArr, sessionRowsArr) {
+  if (totalResiduosArr === undefined) totalResiduosArr = totalResiduosDesdeSheets;
+  if (sessionRowsArr === undefined) sessionRowsArr = totalResiduosRows;
+  var set = {};
+  totalResiduosArr.forEach(function(r){
+    if (((r['Sucursal']||'')+'') !== suc) return;
+    if (anio && String(r['Año']||'') !== anio) return;
+    var nombre = (r['Residuo']||'')+'';
+    if (nombre) set[normResiduo(nombre)] = nombre;
+  });
+  sessionRowsArr.forEach(function(r){
+    if (r.suc !== suc) return;
+    if (anio && r.mes.slice(0,4) !== anio) return;
+    if (r.residuo) set[normResiduo(r.residuo)] = r.residuo;
+  });
+  return set;
+}
+// Arma {estado, detalle} para 'segregacion_anual' (Salfa: "Asegurar una
+// correcta segregación de residuos") a partir de Total Residuos en vez de
+// rowsSuc (solo ve el Excel de ESTA sesión) — mismo motivo que
+// valorizar_residuo/reg_valorizar/respel arriba: subir un Excel de un solo
+// mes sin ningún residuo distinto de Escombro/Excavación/Domiciliario hacía
+// aparecer el objetivo como "No" pese a haber otros residuos registrados en
+// meses anteriores del mismo año, ya sincronizados a Total Residuos.
+var GENERICOS_SEGREGACION_ANUAL_ = {escombro:1,excavacion:1,domiciliario:1,domiciliarios:1};
+function calcSegregacionAnualLive_(suc, anio, totalResiduosArr, sessionRowsArr) {
+  var presentes = residuosPresentesDeSucAnio_(suc, anio, totalResiduosArr, sessionRowsArr);
+  var otros = Object.keys(presentes).filter(function(k){ return !GENERICOS_SEGREGACION_ANUAL_[k]; }).map(function(k){ return presentes[k]; });
+  return {
+    estado: otros.length > 0 ? 'OK' : 'No',
+    detalle: otros.length > 0 ? otros.join(', ') : 'Solo Escombro/Excavación/Domiciliario registrados este año'
+  };
+}
 // Cantidad de retiros de Respel (residuos clasificados RESPEL, ver isRespel())
 // para esta sucursal — Sheets + sesión actual combinados, mismo criterio que
 // residuosValorizadosDeSuc_/residuosPresentesDeSuc_ arriba. Antes "Registrar
@@ -2552,16 +2594,14 @@ function calcObjetivos(anio) {
         estado=mesesVisita.length>0?'OK':'No';
         detalle=mesesVisita.length>0?mesesVisita.join(', '):'No se registraron '+(cseKeyChk==='charla'?'charlas':'visitas a terreno');
       } else if(obj.tipo==='segregacion_anual'){
-        // Correcta segregacion (Salfa, ahora anual): OK si aparece algun
-        // residuo que no sea Escombro/Excavacion/Domiciliario en todo el año.
-        var genericosSeg={escombro:1,excavacion:1,domiciliario:1,domiciliarios:1};
-        var otrosResAnual=[];
-        rowsSuc.forEach(function(r){
-          var keySeg=normResiduo(r['Residuo']);
-          if(keySeg && !genericosSeg[keySeg] && otrosResAnual.indexOf(r['Residuo'])<0) otrosResAnual.push(r['Residuo']);
-        });
-        estado=otrosResAnual.length>0?'OK':'No';
-        detalle=otrosResAnual.length>0?otrosResAnual.join(', '):'Solo Escombro/Excavación/Domiciliario registrados este año';
+        // FIX (mismo caso que valorizar_residuo/reg_valorizar/respel arriba):
+        // usa Total Residuos (calcSegregacionAnualLive_) en vez de rowsSuc
+        // (solo ve el Excel de ESTA sesión) — así un residuo distinto ya
+        // registrado en un mes anterior del mismo año sigue contando, aunque
+        // el Excel de hoy no lo incluya. A diferencia de esos otros, este SÍ
+        // se acota por año (no es un logro permanente).
+        var rSeg=calcSegregacionAnualLive_(suc, anio);
+        estado=rSeg.estado; detalle=rSeg.detalle;
       }
       // tipo:'manual_anual' (ej. "Contactar Nuevos proveedores") nunca
       // calcula un estado aca — se ingresa a mano en la fila "Anual" de
@@ -3396,6 +3436,11 @@ function renderCopecObjetivos() {
         var estado = numRetiros > 0 ? numRetiros+' retiro'+(numRetiros!==1?'s':'') : 'No';
         var detalle = numRetiros === 0 ? 'No se registraron retiros de Respel' : '';
         objAnualBySuc[suc + '|' + o.nombre] = {suc:suc, mes:'Anual', mesKey:'anual', obj:o.nombre, estado:estado, detalle:detalle, anual:true};
+      });
+    } else if (o.tipo === 'segregacion_anual') {
+      sucursales.forEach(function(suc){
+        var rSeg = calcSegregacionAnualLive_(suc, fA);
+        objAnualBySuc[suc + '|' + o.nombre] = {suc:suc, mes:'Anual', mesKey:'anual', obj:o.nombre, estado:rSeg.estado, detalle:rSeg.detalle, anual:true};
       });
     }
   });

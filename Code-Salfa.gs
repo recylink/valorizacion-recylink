@@ -218,6 +218,30 @@ function readRespelSheet_() {
   });
 }
 
+// Lee "Total Residuos" completa como array de objetos (Sucursal | Año | Mes |
+// Residuo | Valorizado/No Valorizado | Respel no respel | Total KG | Total M3),
+// igual formato que las otras hojas leidas por el doGet clasico. Usa
+// buscarFilaEncabezado_ (no la fila 5 fija de las otras 3 hojas) porque
+// "Total Residuos" no tiene las filas decorativas de titulo/instrucciones
+// que si tienen esas 3.
+function readTotalResiduosSheet_() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Total Residuos');
+  if (!sheet) return [];
+  var headerRow = buscarFilaEncabezado_(sheet, 'Sucursal');
+  if (!headerRow) return [];
+  var startRow = headerRow + 1;
+  var lastRow = sheet.getLastRow();
+  if (lastRow < startRow) return [];
+  var lastCol = sheet.getLastColumn();
+  var headers = sheet.getRange(headerRow, 1, 1, lastCol).getValues()[0];
+  var data = sheet.getRange(startRow, 1, lastRow - startRow + 1, lastCol).getValues();
+  return data.filter(function (r) { return String(r[0] || '').trim() !== ''; }).map(function (r) {
+    var obj = {};
+    headers.forEach(function (h, i) { if (h) obj[h] = r[i]; });
+    return obj;
+  });
+}
+
 // ── Costo e Ingreso por residuo ──
 // Esta función faltaba en el script original (doPost ya la llamaba pero no
 // existía). Headers: Sucursal | Año | Mes | Residuo | Total KG | Costo Total |
@@ -940,7 +964,8 @@ function doGetClasico_(e) {
     valorizacion: readSheet('♻️ Valorización') || readSheet('Valorización'),
     trazabilidad: readSheet('📊 Trazabilidad_Docs') || readSheet('Trazabilidad_Docs'),
     objetivos: readSheet('🎯 Objetivos') || readSheet('Objetivos'),
-    respel: readRespelSheet_()
+    respel: readRespelSheet_(),
+    totalResiduos: readTotalResiduosSheet_()
   };
 
   return ContentService
