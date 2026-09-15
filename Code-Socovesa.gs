@@ -338,7 +338,24 @@ function writeMinutas_(ss, data) {
   var sheet = encontrarHojaMinuta_();
 
   (data.sessions || []).forEach(function (session) {
-    if (!session.headerRow) return; // sesión sin referencia de fila, se omite por seguridad
+    // Sesión nueva (creada desde el visor con "＋ Nueva minuta", 2026-09-15
+    // — a pedido del usuario, "poder crear minutas como en las otras
+    // empresas"): todavía no tiene fila en el Sheet, así que en vez de
+    // omitirla (como antes) se agrega un bloque nuevo al final — título,
+    // sub-encabezado, ítems y una fila en blanco de separación si ya había
+    // contenido. La próxima vez que se recarguen las minutas, esta sesión
+    // va a tener su propio headerRow real y usará el camino normal de abajo.
+    if (!session.headerRow) {
+      var lastRow = sheet.getLastRow();
+      var startRow = lastRow > 0 ? lastRow + 2 : 1;
+      var nuevasFilas = [[session.title || '', '', '', '', '']];
+      nuevasFilas.push(['Item', 'Cumplimiento', 'Comentario', 'Acuerdos', 'Revisado']);
+      (session.items || []).forEach(function (it) {
+        nuevasFilas.push([it.item || '', !!it.cumplido, it.comentario || '', it.acuerdos || '', !!it.revisado]);
+      });
+      sheet.getRange(startRow, 1, nuevasFilas.length, 5).setValues(nuevasFilas);
+      return;
+    }
     var dataStartRow = session.dataStartRow || (session.headerRow + 1);
     var colMap = session.colMap || { item:0, cumplido:1, comentario:2, acuerdos:3, revisado:4 };
 
