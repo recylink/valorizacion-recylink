@@ -74,7 +74,8 @@ function doGet(e) {
     respel: readRespelSheet_(),
     avance: readAvanceSheet_(),
     cse: readCseSheet_(),
-    totalResiduos: readTotalResiduosSheet_()
+    totalResiduos: readTotalResiduosSheet_(),
+    costoPresupuesto: readCostoPresupuestoSheet_()
   };
 
   return ContentService
@@ -94,6 +95,7 @@ function doPost(e) {
     else if (tipo === 'trazabilidad') writeTrazabilidad(ss, data);
     else if (tipo === 'objetivos') writeObjetivos(ss, data);
     else if (tipo === 'totalResiduos') writeTotalResiduos(ss, data);
+    else if (tipo === 'costoPresupuesto') writeCostoPresupuesto(ss, data);
     else if (tipo === 'avance') writeAvance(ss, data);
     else if (tipo === 'minutas') writeMinutaSessions_(data.sessions);
     else if (tipo === 'cse') writeCSE_(ss, data);
@@ -288,6 +290,65 @@ function writeTotalResiduos(ss, data) {
 // que hasta ahora solo vivían en esta hoja sin exponerse por GET).
 function readTotalResiduosSheet_() {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Total Residuos');
+  if (!sheet) return [];
+  var headerRow = buscarFilaEncabezado_(sheet, 'Sucursal');
+  if (!headerRow) return [];
+  var startRow = headerRow + 1;
+  var lastRow = sheet.getLastRow();
+  if (lastRow < startRow) return [];
+  var lastCol = sheet.getLastColumn();
+  var headers = sheet.getRange(headerRow, 1, 1, lastCol).getValues()[0];
+  var data = sheet.getRange(startRow, 1, lastRow - startRow + 1, lastCol).getValues();
+  return data.filter(function (r) { return String(r[0] || '').trim() !== ''; }).map(function (r) {
+    var obj = {};
+    headers.forEach(function (h, i) { if (h) obj[h] = r[i]; });
+    return obj;
+  });
+}
+
+// Escribe "💰 Costo Presupuesto" (Sucursal | Año | Mes | Residuo | Costo |
+// Ingreso). Dos tipos de fila conviven ahí:
+//  - Detalle mensual: Mes = nombre real (ej. "Marzo"), Año = el año real,
+//    Residuo = el residuo puntual. Clave = Sucursal|Año|Mes (sin Residuo,
+//    mismo criterio que Total Residuos): si el Excel nuevo trae un
+//    desglose distinto de residuos para ese mes, se reemplaza completo.
+//  - Presupuesto: Mes = "Presupuesto" (literal), Año vacío (el presupuesto
+//    es de todo el proyecto, no se resetea cada año), Residuo = "Excavación"
+//    o vacío (Residuos). Clave = Sucursal|Presupuesto|Residuo (acá SÍ
+//    importa el Residuo, para no confundir el presupuesto de Excavación
+//    con el de Residuos) — cada categoría es su propia fila permanente.
+function claveCostoPresupuesto_(suc, anio, mes, residuo) {
+  if (mes === 'Presupuesto') return suc + '||' + mes + '||' + residuo;
+  return suc + '||' + anio + '||' + mes;
+}
+function writeCostoPresupuesto(ss, data) {
+  var sheet = ss.getSheetByName('💰 Costo Presupuesto');
+  if (!sheet) throw new Error('Hoja "💰 Costo Presupuesto" no encontrada');
+  var headerRow = buscarFilaEncabezado_(sheet, 'Sucursal');
+  if (!headerRow) throw new Error('No se encontro la fila de encabezado ("Sucursal") en Costo Presupuesto');
+  var startRow = headerRow + 1;
+  var lastRow = sheet.getLastRow();
+
+  if (data.filas && data.filas.length > 0) {
+    var keys = new Set(data.filas.map(function (f) { return claveCostoPresupuesto_(String(f[0]), String(f[1]), String(f[2]), String(f[3])); }));
+    if (lastRow >= startRow) {
+      var cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 4).getValues();
+      var toDelete = [];
+      cols.forEach(function (r, i) {
+        var key = claveCostoPresupuesto_(String(r[0]), String(r[1]), String(r[2]), String(r[3]));
+        if (keys.has(key)) toDelete.push(startRow + i);
+      });
+      toDelete.reverse().forEach(function (r) { sheet.deleteRow(r); });
+    }
+    var insertRow = sheet.getLastRow() + 1;
+    sheet.getRange(insertRow, 1, data.filas.length, data.filas[0].length).setValues(data.filas);
+  }
+}
+
+// Lee "💰 Costo Presupuesto" completa como array de objetos, mismo formato
+// que readTotalResiduosSheet_.
+function readCostoPresupuestoSheet_() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('💰 Costo Presupuesto');
   if (!sheet) return [];
   var headerRow = buscarFilaEncabezado_(sheet, 'Sucursal');
   if (!headerRow) return [];

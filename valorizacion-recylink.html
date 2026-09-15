@@ -216,6 +216,10 @@ tbody tr:hover{background:var(--surface2)}
         <button class="btn btn-ghost" id="btn-gestionar-sucursales" style="display:none">&#127970; Sucursales cerradas</button>
         <button class="btn btn-ghost" id="btn-editar-metas" style="display:none">&#9998; Editar metas</button>
         <button class="btn btn-ghost" id="btn-gestionar-objetivos-suc" style="display:none">&#128564; Objetivos por sucursal</button>
+        <button class="btn btn-ghost" id="btn-editar-presupuesto-cp" style="display:none">&#128176; Editar presupuestos</button>
+        <label id="lbl-descontar-venta-cp" style="display:none;align-items:center;gap:6px;font-size:12px;color:var(--text-sec);cursor:pointer">
+          <input type="checkbox" id="chk-descontar-venta-cp"> Descontar venta de residuo del presupuesto
+        </label>
       </div>
       <div id="sucursales-form" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
@@ -237,6 +241,17 @@ tbody tr:hover{background:var(--surface2)}
           </div>
         </div>
         <div id="metas-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px"></div>
+      </div>
+      <div id="presupuesto-cp-form" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <span style="font-size:14px;font-weight:600;color:var(--text)">Presupuesto por obra (proyecto completo)</span>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost" id="btn-cancelar-presupuesto-cp">Cancelar</button>
+            <button class="btn btn-primary" id="btn-guardar-presupuesto-cp">Guardar</button>
+          </div>
+        </div>
+        <p style="font-size:12px;color:var(--text-muted);margin:0 0 14px">Monto total fijo para toda la vida del proyecto (no por año). Deja en blanco si no aplica.</p>
+        <div id="presupuesto-cp-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:10px"></div>
       </div>
       <div id="objetivos-suc-form" style="display:none;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
@@ -374,7 +389,8 @@ var EMPRESAS = {
       {id:'co2',                    nombre:'Ton CO2 evitadas/M2',                                  tipo:'manual'},
       {id:'proveedores',            nombre:'Contactar Nuevos proveedores',                         tipo:'manual_anual'},
       {id:'acompanamiento',         nombre:'Acompañamiento en terreno, mediante charlas y una auditoría', tipo:'acompanamiento_anual'},
-      {id:'costo',                  nombre:'Costo/Presupuesto',                                    tipo:'manual'}
+      {id:'costo_presupuesto_residuos',    nombre:'Costo/Presupuesto Residuos',    tipo:'costo_presupuesto', categoria:'residuos'},
+      {id:'costo_presupuesto_excavacion',  nombre:'Costo/Presupuesto Excavación',  tipo:'costo_presupuesto', categoria:'excavacion'}
     ]
   },
   salfa: {
@@ -609,7 +625,7 @@ function isRespel(residuo) {
   return key.indexOf('respel') >= 0;
 }
 var DOC_LABELS = {cert:'cert. tratamiento',factura:'factura',decl:'cert. declaracion',transp:'transportista',disp:'disposicion final'};
-var OBJ_ANUALES = {valorizar_residuo:1,reg_valorizar:1,respel:1,valorizar_especificos:1,acompanamiento_anual:1,manual_anual:1,segregacion_anual:1,segregar_especificos:1};
+var OBJ_ANUALES = {valorizar_residuo:1,reg_valorizar:1,respel:1,valorizar_especificos:1,acompanamiento_anual:1,manual_anual:1,segregacion_anual:1,segregar_especificos:1,costo_presupuesto:1};
 // Nombre "virtual" para poder dormir por sucursal el aporte de % valorizacion
 // vs. meta al calculo de salud — no es un objetivo real de emp.objetivos (no
 // tiene fila propia en la tabla), pero se trata igual para efectos de
@@ -1074,9 +1090,13 @@ function calcSaludEmpresa_(companyId, data, anio) {
         var rSeg = calcSegregacionAnualLive_(suc, anio, data.totalResiduos||[], []);
         return scoreObjSalud_(rSeg.estado, rSeg.detalle);
       }
+      if (o.tipo === 'costo_presupuesto') {
+        var rCP = calcCostoPresupuestoLive_(suc, o.categoria, costoPresupuestoDescontarVenta, data.costoPresupuesto||[], []);
+        return scoreObjSalud_(rCP.estado, rCP.detalle, true);
+      }
       if (OBJ_ANUALES[o.tipo]) {
         var rAnu = objInfo.objAnualBySuc[suc+'|'+o.nombre];
-        return rAnu ? scoreObjSalud_(rAnu.estado, rAnu.detalle) : 0;
+        return rAnu ? scoreObjSalud_(rAnu.estado, rAnu.detalle, o.tipo==='costo_presupuesto') : 0;
       }
       var valsMes = [];
       var prefix = suc+'|';
@@ -1211,7 +1231,7 @@ var SUC_ALIAS = {
 };
 
 var empresaActual = 'copec';
-var valMatrix = {}, trazRows = [], sucursales = [], mesesDisp = [], rawRows = [], totalResiduosRows = [], costoIngresoRows = [];
+var valMatrix = {}, trazRows = [], sucursales = [], mesesDisp = [], rawRows = [], totalResiduosRows = [], costoIngresoRows = [], costoPresupuestoRows = [];
 // "Total Residuos" ya sincronizado (leído del doGet vía loadSheetsData()) —
 // filas crudas {Sucursal, Año, Mes, Residuo, "Valorizado/No Valorizado",
 // "Total KG", ...}. A diferencia de valMatrix/acumFromSheets, esto SI tiene
@@ -1223,6 +1243,22 @@ var valMatrix = {}, trazRows = [], sucursales = [], mesesDisp = [], rawRows = []
 // preservarlo es justamente lo que permite que subir el Excel de un solo
 // mes no arruine el acumulado de los meses anteriores).
 var totalResiduosDesdeSheets = [];
+// "💰 Costo Presupuesto" de Euro ya sincronizado (leído del doGet vía
+// loadSheetsData()) — filas crudas {Sucursal, Año, Mes, Residuo, Costo,
+// Ingreso}. Mismo criterio que totalResiduosDesdeSheets: NO se reinicia en
+// processData() (el presupuesto y el costo acumulado de meses anteriores no
+// deben perderse al subir el Excel de un solo mes) — solo se le suman los
+// meses que sí traiga el Excel nuevo (costoPresupuestoRows, ver
+// costoPresupuestoAgregadoDeSuc_ más abajo).
+var costoPresupuestoDesdeSheets = [];
+// Toggle "Descontar venta de residuo del presupuesto" (ver costoPresupuestoAgregadoDeSuc_) — por
+// empresa, guardado en localStorage para no resetearse entre sesiones.
+var costoPresupuestoDescontarVenta = false;
+try { costoPresupuestoDescontarVenta = localStorage.getItem('costo_presupuesto_descontar_venta') === '1'; } catch(e) { costoPresupuestoDescontarVenta = false; }
+document.addEventListener('DOMContentLoaded', function(){
+  var chk = document.getElementById('chk-descontar-venta-cp');
+  if (chk) chk.checked = costoPresupuestoDescontarVenta;
+});
 // Ediciones de objetivos manuales hechas desde el visor en esta sesion (ver
 // "Editar objetivo manual"): companyId -> {anual:{suc|obj:{estado,detalle}},
 // mensual:{suc|mesKey|obj:{estado,detalle}}}. Se mergean sobre el resultado
@@ -1400,7 +1436,7 @@ function initEmpresaPills() {
 }
 
 function resetData() {
-  valMatrix={}; trazRows=[]; sucursales=[]; mesesDisp=[]; rawRows=[]; totalResiduosRows=[]; acumFromSheets={}; sheetsObjetivosData=null; metasFromSheets={};
+  valMatrix={}; trazRows=[]; sucursales=[]; mesesDisp=[]; rawRows=[]; totalResiduosRows=[]; costoPresupuestoRows=[]; acumFromSheets={}; sheetsObjetivosData=null; metasFromSheets={};
   if (chartInst) { chartInst.destroy(); chartInst=null; }
   // Remove grouped val view if exists
   var grouped = document.getElementById('val-grouped');
@@ -1417,6 +1453,8 @@ function resetData() {
   document.getElementById('obj-empty').style.display = hasObj ? 'none' : '';
   document.getElementById('obj-content').style.display = hasObj ? 'block' : 'none';
   document.getElementById('btn-editar-metas').style.display = (empresaActual==='copec'||empresaActual==='acciona'||empresaActual==='gespania'||empresaActual==='vital'||empresaActual==='londres') ? 'inline-flex' : 'none';
+  document.getElementById('btn-editar-presupuesto-cp').style.display = empresaActual==='euro' ? 'inline-flex' : 'none';
+  document.getElementById('lbl-descontar-venta-cp').style.display = empresaActual==='euro' ? 'flex' : 'none';
   document.getElementById('btn-sync-fgr').style.display = 'none';
   document.getElementById('btn-gestionar-sucursales').style.display = 'none';
   document.getElementById('btn-gestionar-objetivos-suc').style.display = 'none';
@@ -1521,6 +1559,7 @@ function processData(rows, fname) {
   valMatrix = valMatrixDesdeSheets;
   totalResiduosRows = [];
   costoIngresoRows = [];
+  costoPresupuestoRows = [];
   // acumFromSheets NO se reinicia a proposito, mismo motivo que valMatrix
   // arriba — getAcum() ya prioriza acumFromSheets por sobre el recalculo
   // desde valMatrix, asi que los meses que no vengan en este Excel siguen
@@ -1547,6 +1586,11 @@ function processData(rows, fname) {
   // no repetir el bug de "se olvido agregar la empresa nueva a la lista" que
   // ya paso con generaTotalResiduos/metasActuales (ver CONTEXTO-PROYECTO.md).
   var generaCostoIngreso = (emp.objetivos || []).some(function(o){ return o.tipo === 'kpi_costo'; });
+  // Costo/Presupuesto (Euro, "💰 Costo Presupuesto"): mismo criterio que
+  // generaCostoIngreso arriba, derivado de emp.objetivos en vez de
+  // hardcodear la empresa.
+  var generaCostoPresupuesto = (emp.objetivos || []).some(function(o){ return o.tipo === 'costo_presupuesto'; });
+  var costoPresupuestoMap = {}; // Sucursal+Mes+Residuo -> {costo, ingreso}
 
   rows.forEach(function(r) {
     var suc = r['Sucursal']||'';
@@ -1640,9 +1684,22 @@ function processData(rows, fname) {
     g.ingresoTotal += ingreso;
     g.kgTotal += kg;
     if (ingreso > 0) g.tieneIngreso++;
+
+    // Costo/Presupuesto (Euro): a diferencia de kpi_costo arriba, SÍ incluye
+    // Multas (a pedido del usuario — "multas si se suma al costo, pero
+    // nunca se ingresa la verdad", así que casi siempre será 0, pero se
+    // deja contemplado por si alguna vez se completa).
+    if (generaCostoPresupuesto) {
+      var costoCP = costo + (parseFloat(r['Multas'])||0);
+      var keyCP = suc+'||'+mes+'||'+residuo;
+      if (!costoPresupuestoMap[keyCP]) costoPresupuestoMap[keyCP] = {suc:suc, mes:mes, residuo:residuo, costo:0, ingreso:0};
+      costoPresupuestoMap[keyCP].costo += costoCP;
+      costoPresupuestoMap[keyCP].ingreso += ingreso;
+    }
   });
 
   if (generaTotalResiduos) totalResiduosRows = Object.values(trMap);
+  if (generaCostoPresupuesto) costoPresupuestoRows = Object.values(costoPresupuestoMap);
   // Costo e Ingreso por residuo: una fila por Sucursal+Mes+Residuo con el costo
   // de transporte y el ingreso por venta acumulados (misma agrupacion que
   // alimenta el KPI costo/ingreso en calcObjetivos(), para que los totales
@@ -1683,6 +1740,8 @@ function processData(rows, fname) {
   document.getElementById('obj-empty').style.display=hasObj?'none':'';
   document.getElementById('obj-content').style.display=hasObj?'block':'none';
   document.getElementById('btn-editar-metas').style.display=(empresaActual==='copec'||empresaActual==='acciona'||empresaActual==='gespania'||empresaActual==='vital'||empresaActual==='londres')?'inline-flex':'none';
+  document.getElementById('btn-editar-presupuesto-cp').style.display = empresaActual==='euro' ? 'inline-flex' : 'none';
+  document.getElementById('lbl-descontar-venta-cp').style.display = empresaActual==='euro' ? 'flex' : 'none';
   document.getElementById('btn-sync-fgr').style.display=(empresaActual==='euro')?'inline-flex':'none';
   document.getElementById('btn-gestionar-sucursales').style.display=sucursales.length>0?'inline-flex':'none';
   document.getElementById('btn-gestionar-objetivos-suc').style.display=(sucursales.length>0&&emp.objetivos&&emp.objetivos.length>0)?'inline-flex':'none';
@@ -1805,6 +1864,15 @@ function autoSync(rows) {
       parseFloat((r.ingreso - r.costo).toFixed(2))
     );
     return row;
+  });
+
+  // Costo/Presupuesto (Euro, "💰 Costo Presupuesto"): Sucursal | Año | Mes |
+  // Residuo | Costo | Ingreso. Solo el detalle mensual (costoPresupuestoRows)
+  // — las filas de Presupuesto (fijas, de todo el proyecto, sin año) se
+  // sincronizan aparte desde "Editar presupuestos" (btn-guardar-presupuesto-cp),
+  // no en cada autoSync(), porque no cambian con cada Excel.
+  var filasCostoPresupuesto = costoPresupuestoRows.map(function(r){
+    return [r.suc, r.mes.slice(0,4), MESES_ES[parseInt(r.mes.slice(5))], r.residuo, parseFloat(r.costo.toFixed(2)), parseFloat(r.ingreso.toFixed(2))];
   });
 
   // Preparar payload trazabilidad
@@ -1939,6 +2007,9 @@ function autoSync(rows) {
     })
     .then(function(){
       if (filasCostoIngreso.length) return sendPayload({tipo:'costoIngreso', filas:filasCostoIngreso});
+    })
+    .then(function(){
+      if (filasCostoPresupuesto.length) return sendPayload({tipo:'costoPresupuesto', filas:filasCostoPresupuesto});
     })
     .then(function(){
       if (filasAvance.length) return sendPayload({tipo:'avance', filas:filasAvance});
@@ -2194,6 +2265,60 @@ function calcSegregacionAnualLive_(suc, anio, totalResiduosArr, sessionRowsArr) 
     estado: otros.length > 0 ? 'OK' : 'No',
     detalle: otros.length > 0 ? otros.join(', ') : 'Solo Escombro/Excavación/Domiciliario registrados este año'
   };
+}
+// Costo/Presupuesto (Euro, "💰 Costo Presupuesto"): a diferencia de TODOS
+// los objetivos de residuos de arriba, este NO se acota por año — el
+// presupuesto es de todo el proyecto de principio a fin, no se resetea cada
+// año (a pedido del usuario, 2026-09-15) — mismo criterio que ya usa Euro
+// para el FGR acumulado desde el inicio del proyecto en el visor standalone.
+// categoria: 'excavacion' o 'residuos' (cualquier residuo que no sea
+// Excavación) — cada una se compara contra su propio presupuesto, cargado
+// en una fila con Mes="Presupuesto" (ver Code-Euro.gs, writeCostoPresupuesto).
+// descontarVenta: si true, resta el Ingreso (venta de residuo) del Costo
+// bruto antes de comparar contra el presupuesto — ver el toggle
+// "Descontar venta de residuo del presupuesto" (costoPresupuestoDescontarVenta).
+function costoPresupuestoAgregadoDeSuc_(suc, categoria, descontarVenta, totalCPArr, sessionCPArr) {
+  if (totalCPArr === undefined) totalCPArr = costoPresupuestoDesdeSheets;
+  if (sessionCPArr === undefined) sessionCPArr = costoPresupuestoRows;
+  function esCategoria(residuo) {
+    var esExc = normResiduo(residuo) === 'excavacion';
+    return categoria === 'excavacion' ? esExc : !esExc;
+  }
+  var costoAcumulado = 0, ingresoAcumulado = 0, presupuesto = null;
+  totalCPArr.forEach(function(r){
+    if (((r['Sucursal']||'')+'') !== suc) return;
+    var mes = (r['Mes']||'')+'';
+    if (mes === 'Presupuesto') {
+      var esResiduoExc = normResiduo(r['Residuo']) === 'excavacion';
+      if ((categoria === 'excavacion') === esResiduoExc) presupuesto = parseFloat(r['Costo']) || 0;
+      return;
+    }
+    if (!esCategoria(r['Residuo'])) return;
+    costoAcumulado += parseFloat(r['Costo']) || 0;
+    ingresoAcumulado += parseFloat(r['Ingreso']) || 0;
+  });
+  sessionCPArr.forEach(function(r){
+    if (r.suc !== suc) return;
+    if (!esCategoria(r.residuo)) return;
+    costoAcumulado += r.costo || 0;
+    ingresoAcumulado += r.ingreso || 0;
+  });
+  var costoNeto = descontarVenta ? (costoAcumulado - ingresoAcumulado) : costoAcumulado;
+  var pct = (presupuesto !== null && presupuesto > 0) ? (costoNeto / presupuesto * 100) : null;
+  return {costoAcumulado:costoAcumulado, ingresoAcumulado:ingresoAcumulado, costoNeto:costoNeto, presupuesto:presupuesto, pct:pct};
+}
+// Arma {estado, detalle} para el objetivo 'costo_presupuesto' a partir de
+// costoPresupuestoAgregadoDeSuc_. estado = "% gastado" del presupuesto (OJO:
+// para colorear/puntuar esto hay que INVERTIR el criterio — a diferencia de
+// todos los demás objetivos en % de esta app, acá MENOS es mejor, no más —
+// ver el parámetro invertido en objColor/estadoCell/scoreObjSalud_).
+function calcCostoPresupuestoLive_(suc, categoria, descontarVenta, totalCPArr, sessionCPArr) {
+  var r = costoPresupuestoAgregadoDeSuc_(suc, categoria, descontarVenta, totalCPArr, sessionCPArr);
+  if (r.presupuesto === null) return {estado:'', detalle:'Sin presupuesto cargado'};
+  var estado = fmtPct(r.pct);
+  var detalle = 'Gastado: $'+Math.round(r.costoNeto).toLocaleString('es-CL')+' de $'+Math.round(r.presupuesto).toLocaleString('es-CL')
+    + (descontarVenta && r.ingresoAcumulado > 0 ? ' (venta descontada: $'+Math.round(r.ingresoAcumulado).toLocaleString('es-CL')+')' : '');
+  return {estado:estado, detalle:detalle};
 }
 // Cantidad de retiros de Respel (residuos clasificados RESPEL, ver isRespel())
 // para esta sucursal — Sheets + sesión actual combinados, mismo criterio que
@@ -2672,6 +2797,11 @@ function calcObjetivos(anio) {
           estado=otrosResAnual.length>0?'OK':'No';
           detalle=otrosResAnual.length>0?otrosResAnual.join(', '):'Solo Escombro/Excavación/Domiciliario registrados este año';
         }
+      } else if(obj.tipo==='costo_presupuesto'){
+        // Sin acotar por año (ver costoPresupuestoAgregadoDeSuc_) — el
+        // presupuesto es de todo el proyecto, no se resetea cada año.
+        var rCP=calcCostoPresupuestoLive_(suc, obj.categoria, costoPresupuestoDescontarVenta);
+        estado=rCP.estado; detalle=rCP.detalle;
       }
       // tipo:'manual_anual' (ej. "Contactar Nuevos proveedores") nunca
       // calcula un estado aca — se ingresa a mano en la fila "Anual" de
@@ -2852,27 +2982,33 @@ function calcObjetivos(anio) {
 // numero/porcentaje se usa tal cual (tope 100), y si no hay estado pero si
 // detalle (objetivos informativos como CO2ev/m2, que nunca asignan estado)
 // cuenta 100 si hay dato, 0 si no hay nada.
-function scoreObjSalud_(estado, detalle){
+// invertido=true: para objetivos donde MENOS es mejor (ej. costo_presupuesto,
+// "% gastado del presupuesto") en vez del resto de los objetivos en % de
+// esta app, donde MÁS es mejor (valorización, segregación, etc.).
+function scoreObjSalud_(estado, detalle, invertido){
   if (estado === 'OK') return 100;
   if (estado === 'No') return 0;
   if (estado && (estado+'').indexOf('retiro') >= 0) return 100;
   if (estado) {
     var n = parseFloat((estado+'').replace(',','.').replace('%',''));
-    if (!isNaN(n)) return Math.min(100, Math.max(0, n));
+    if (!isNaN(n)) return invertido ? Math.min(100, Math.max(0, 100 - n)) : Math.min(100, Math.max(0, n));
   }
   return detalle ? 100 : 0;
 }
-function objColor(estado){
+function objColor(estado, invertido){
   if(estado==='OK')return 'var(--green)';
   if(estado==='No')return 'var(--red)';
   var n=parseFloat((estado+'').replace(',','.').replace('%',''));
-  if(!isNaN(n)){return n>=100?'var(--green)':n>=60?'var(--yellow)':'var(--red)';}
+  if(!isNaN(n)){
+    if (invertido) return n<=80?'var(--green)':n<=100?'var(--yellow)':'var(--red)';
+    return n>=100?'var(--green)':n>=60?'var(--yellow)':'var(--red)';
+  }
   return 'var(--green)';
 }
-function estadoCell(estado, detalle) {
+function estadoCell(estado, detalle, invertido) {
   if (!estado && !detalle) return '<td style="padding:9px 12px;border-left:1px solid var(--border);color:var(--text-muted)">--</td>';
   if (!estado) return '<td style="padding:9px 12px;border-left:1px solid var(--border);color:var(--text-muted);font-size:11px">'+detalle+'</td>';
-  var color = objColor(estado);
+  var color = objColor(estado, invertido);
   var pctN = parseFloat((estado+'').replace(',','.').replace('%',''));
   var hasBar = !isNaN(pctN) && estado!=='OK' && estado!=='No' && (estado+'').indexOf('retiro')<0;
   var bar = hasBar
@@ -3086,6 +3222,7 @@ function loadSheetsData(data) {
   rawRows = [];
   acumFromSheets = {};
   totalResiduosDesdeSheets = data.totalResiduos || [];
+  costoPresupuestoDesdeSheets = data.costoPresupuesto || [];
 
   // Cargar hoja "% de avance" de Euro: m2 totales por obra + % Avance manual
   // por obra/mes. Usado para calcular FGR y Ton CO2 evitadas/m2.
@@ -3303,6 +3440,8 @@ function loadSheetsData(data) {
   document.getElementById('obj-content').style.display = hasObj || empresaActual === 'copec' || empresaActual === 'abastible' ? 'block' : 'none';
   document.getElementById('obj-empty').style.display = (hasObj || empresaActual === 'copec' || empresaActual === 'abastible') ? 'none' : '';
   document.getElementById('btn-editar-metas').style.display = (empresaActual === 'copec'||empresaActual==='acciona'||empresaActual==='gespania'||empresaActual==='vital'||empresaActual==='londres') ? 'inline-flex' : 'none'; // Abastible no tiene metas editables
+  document.getElementById('btn-editar-presupuesto-cp').style.display = empresaActual==='euro' ? 'inline-flex' : 'none';
+  document.getElementById('lbl-descontar-venta-cp').style.display = empresaActual==='euro' ? 'flex' : 'none';
   document.getElementById('btn-sync-fgr').style.display = (empresaActual === 'euro') ? 'inline-flex' : 'none';
   document.getElementById('btn-gestionar-sucursales').style.display = sucursales.length > 0 ? 'inline-flex' : 'none';
   document.getElementById('btn-gestionar-objetivos-suc').style.display = (sucursales.length > 0 && emp.objetivos && emp.objetivos.length > 0) ? 'inline-flex' : 'none';
@@ -3546,6 +3685,13 @@ function renderCopecObjetivos() {
         var rSeg = calcSegregacionAnualLive_(suc, fA);
         objAnualBySuc[suc + '|' + o.nombre] = {suc:suc, mes:'Anual', mesKey:'anual', obj:o.nombre, estado:rSeg.estado, detalle:rSeg.detalle, anual:true};
       });
+    } else if (o.tipo === 'costo_presupuesto') {
+      // Sin acotar por año (ver costoPresupuestoAgregadoDeSuc_) — el
+      // presupuesto es de todo el proyecto, no de un año puntual.
+      sucursales.forEach(function(suc){
+        var rCP = calcCostoPresupuestoLive_(suc, o.categoria, costoPresupuestoDescontarVenta);
+        objAnualBySuc[suc + '|' + o.nombre] = {suc:suc, mes:'Anual', mesKey:'anual', obj:o.nombre, estado:rCP.estado, detalle:rCP.detalle, anual:true};
+      });
     }
   });
 
@@ -3590,7 +3736,7 @@ function renderCopecObjetivos() {
     }).map(function(o){
       if (OBJ_ANUALES[o.tipo]) {
         var rAnu = objAnualBySuc[suc+'|'+o.nombre];
-        return rAnu ? scoreObjSalud_(rAnu.estado, rAnu.detalle) : 0;
+        return rAnu ? scoreObjSalud_(rAnu.estado, rAnu.detalle, o.tipo==='costo_presupuesto') : 0;
       }
       var valsMes = [];
       mesesAnio.forEach(function(m){
@@ -3648,7 +3794,7 @@ function renderCopecObjetivos() {
         var cells='<td style="padding:9px 12px;font-weight:500;color:var(--text);border-right:1px solid var(--border)">'+o.nombre+'</td>';
         if (dormido) cells += celdaDormida();
         else if (esObjetivoManualEditable(o)) cells += celdaObjetivoManual(suc, 'Anual', 'anual', '', o.nombre, r?r.estado:'', r?r.detalle:'');
-        else cells += r ? estadoCell(r.estado, r.detalle) : '<td style="padding:9px 12px;text-align:center;border-left:1px solid var(--border);color:var(--text-muted)">--</td>';
+        else cells += r ? estadoCell(r.estado, r.detalle, o.tipo==='costo_presupuesto') : '<td style="padding:9px 12px;text-align:center;border-left:1px solid var(--border);color:var(--text-muted)">--</td>';
         tr.innerHTML=cells;
         anualBody.appendChild(tr);
       });
@@ -3892,6 +4038,75 @@ document.getElementById('btn-guardar-metas').addEventListener('click', function(
   syncMetas(metas);
   renderCopecObjetivos();
   toast('Metas guardadas');
+});
+
+// Editor de Presupuesto por obra (Euro, "💰 Costo Presupuesto") — a
+// diferencia de Metas, el presupuesto es de todo el proyecto (no por año) y
+// tiene 2 categorías independientes por obra (Residuos/Excavación, ver
+// costoPresupuestoAgregadoDeSuc_).
+function getPresupuestoCP_(suc, categoria) {
+  var match = null;
+  costoPresupuestoDesdeSheets.forEach(function(r){
+    if (((r['Sucursal']||'')+'') !== suc) return;
+    if ((r['Mes']||'') !== 'Presupuesto') return;
+    var esExc = normResiduo(r['Residuo']) === 'excavacion';
+    if ((categoria === 'excavacion') === esExc) match = parseFloat(r['Costo']) || 0;
+  });
+  return match;
+}
+function openPresupuestoCPEditor() {
+  var grid = document.getElementById('presupuesto-cp-grid');
+  grid.innerHTML = '';
+  sucursales.forEach(function(suc){
+    var valRes = getPresupuestoCP_(suc, 'residuos');
+    var valExc = getPresupuestoCP_(suc, 'excavacion');
+    var sucAttr = suc.replace(/"/g,'&quot;');
+    var div = document.createElement('div');
+    div.style.cssText = 'border:1px solid var(--border);border-radius:8px;padding:10px';
+    div.innerHTML = '<div style="font-size:12px;font-weight:600;color:var(--text);margin-bottom:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+suc+'">'+suc+'</div>'
+      + '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px"><label style="font-size:11px;color:var(--text-muted);width:80px">Residuos</label>'
+      + '<input type="number" min="0" data-suc="'+sucAttr+'" data-cat="residuos" value="'+(valRes!==null?valRes:'')+'" style="flex:1;padding:5px 8px;font-size:13px;border:1px solid var(--border);border-radius:var(--radius)"></div>'
+      + '<div style="display:flex;align-items:center;gap:6px"><label style="font-size:11px;color:var(--text-muted);width:80px">Excavación</label>'
+      + '<input type="number" min="0" data-suc="'+sucAttr+'" data-cat="excavacion" value="'+(valExc!==null?valExc:'')+'" style="flex:1;padding:5px 8px;font-size:13px;border:1px solid var(--border);border-radius:var(--radius)"></div>';
+    grid.appendChild(div);
+  });
+  document.getElementById('presupuesto-cp-form').style.display = 'block';
+}
+document.getElementById('btn-editar-presupuesto-cp').addEventListener('click', openPresupuestoCPEditor);
+document.getElementById('btn-cancelar-presupuesto-cp').addEventListener('click', function() {
+  document.getElementById('presupuesto-cp-form').style.display = 'none';
+});
+document.getElementById('btn-guardar-presupuesto-cp').addEventListener('click', function() {
+  var filas = [];
+  document.querySelectorAll('#presupuesto-cp-grid input[data-suc]').forEach(function(inp) {
+    var suc = inp.getAttribute('data-suc');
+    var cat = inp.getAttribute('data-cat');
+    var val = parseFloat(inp.value);
+    if (isNaN(val)) return; // vacio: no se toca lo que ya estaba guardado
+    var residuo = cat === 'excavacion' ? 'Excavación' : '';
+    filas.push([suc, '', 'Presupuesto', residuo, val, '']);
+    // Actualiza el cache local para reflejar el cambio de inmediato, sin
+    // esperar a la proxima "Cargar desde Sheets".
+    costoPresupuestoDesdeSheets = costoPresupuestoDesdeSheets.filter(function(r){
+      return !(((r['Sucursal']||'')+'')===suc && (r['Mes']||'')==='Presupuesto' && (normResiduo(r['Residuo'])==='excavacion')===(cat==='excavacion'));
+    });
+    costoPresupuestoDesdeSheets.push({Sucursal:suc, Año:'', Mes:'Presupuesto', Residuo:residuo, Costo:val, Ingreso:''});
+  });
+  if (filas.length > 0) {
+    fetch(EMPRESAS.euro.scriptUrl, {
+      method:'POST', mode:'no-cors',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({tipo:'costoPresupuesto', filas:filas})
+    }).catch(function(){});
+  }
+  document.getElementById('presupuesto-cp-form').style.display = 'none';
+  renderCopecObjetivos();
+  toast('Presupuestos guardados');
+});
+document.getElementById('chk-descontar-venta-cp').addEventListener('change', function() {
+  costoPresupuestoDescontarVenta = this.checked;
+  try { localStorage.setItem('costo_presupuesto_descontar_venta', costoPresupuestoDescontarVenta ? '1' : '0'); } catch(e) {}
+  renderCopecObjetivos();
 });
 
 // Editor de objetivos dormidos por sucursal: tabla sucursal x objetivo con un
