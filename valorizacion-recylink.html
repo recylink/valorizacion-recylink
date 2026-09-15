@@ -2388,15 +2388,20 @@ function getAcumReal_(suc, upTo, anio) {
 }
 
 function getAcum(suc,upTo,anio){
-  // acumFromSheets ya viene indexado por mesKey "YYYY-MM" (año incluido), asi que
-  // si hay un valor cacheado para ese mes exacto es siempre correcto usarlo tal
-  // cual, se haya pasado "anio" o no.
-  if (acumFromSheets[suc] && acumFromSheets[suc][upTo] !== undefined) return acumFromSheets[suc][upTo];
-  // Ponderado por kg/m3 real (Total Residuos) si hay datos — más preciso
-  // que el fallback de abajo, que trata cada mes ya sincronizado como "100
-  // unidades" fijas sin importar cuánto pesó realmente.
+  // FIX (2026-09-15, a pedido del usuario): antes acumFromSheets (el
+  // snapshot ya sincronizado) se probaba PRIMERO, así que un mes ya
+  // sincronizado alguna vez nunca se volvía a actualizar con datos o
+  // fórmula nuevos — ni resincronizando. Caso real: Socovesa cambió de
+  // medir % de valorización por kg a por m3, pero los meses ya
+  // sincronizados seguían mostrando el % viejo (en kg) para siempre, sin
+  // importar cuántas veces se resincronizara. Ahora el ponderado por
+  // kg/m3 real (Total Residuos, siempre refleja el criterio de cálculo
+  // ACTUAL) se prueba primero; el snapshot sincronizado queda solo como
+  // fallback para cuando no hay ningún dato de Total Residuos para ese mes.
   var real = getAcumReal_(suc, upTo, anio);
   if (real !== null) return real;
+  // acumFromSheets ya viene indexado por mesKey "YYYY-MM" (año incluido).
+  if (acumFromSheets[suc] && acumFromSheets[suc][upTo] !== undefined) return acumFromSheets[suc][upTo];
   var tot=0,val=0;
   var hasSheets=false;
   Object.keys(valMatrix[suc]||{}).forEach(function(m){
