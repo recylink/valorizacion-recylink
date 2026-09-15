@@ -1349,7 +1349,22 @@ function sucursalesConDatosEnAnio(anio) {
 // mostrarse en la tabla y de contar en el % de salud de esa sucursal, sin
 // afectar al resto de sucursales ni a otras empresas. localStorage, por
 // empresa: {empresaId: {sucursal: [nombreObjetivo, ...]}}.
+// EXCEPCION Socovesa (2026-09-15, a pedido del usuario — mismo problema
+// real que Sucursales Cerradas: esto se guardaba en localStorage y se
+// perdía si el navegador borraba datos del sitio): se guarda en la hoja
+// "⚙️ Objetivos Dormidos" en vez de localStorage. Las otras 11 empresas
+// siguen igual que antes, sin cambios.
+var objetivosDormidosDesdeSheets = []; // [{Sucursal, Objetivo}, ...], poblado en loadSheetsData()
 function getObjetivosDormidosUI(companyId) {
+  if ((companyId || empresaActual) === 'socovesa') {
+    var map = {};
+    objetivosDormidosDesdeSheets.forEach(function(r){
+      if (!r.Sucursal || !r.Objetivo) return;
+      map[r.Sucursal] = map[r.Sucursal] || [];
+      map[r.Sucursal].push(r.Objetivo);
+    });
+    return map;
+  }
   try {
     var raw = localStorage.getItem('objetivos_dormidos');
     var all = raw ? JSON.parse(raw) : {};
@@ -1357,6 +1372,19 @@ function getObjetivosDormidosUI(companyId) {
   } catch(e) { return {}; }
 }
 function setObjetivosDormidosUI(map) {
+  if (empresaActual === 'socovesa') {
+    var filas = [];
+    Object.keys(map).forEach(function(suc){
+      (map[suc]||[]).forEach(function(obj){ filas.push([suc, obj]); });
+    });
+    objetivosDormidosDesdeSheets = filas.map(function(f){ return {Sucursal:f[0], Objetivo:f[1]}; }); // refleja de inmediato, sin esperar la red
+    fetch(EMPRESAS.socovesa.scriptUrl, {
+      method:'POST', mode:'no-cors',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({tipo:'objetivosDormidos', filas: filas})
+    }).catch(function(){});
+    return;
+  }
   var raw = localStorage.getItem('objetivos_dormidos');
   var all = {};
   try { all = raw ? JSON.parse(raw) : {}; } catch(e) { all = {}; }
@@ -3246,6 +3274,7 @@ function loadSheetsData(data) {
   totalResiduosDesdeSheets = data.totalResiduos || [];
   costoPresupuestoDesdeSheets = data.costoPresupuesto || [];
   sucursalesCerradasDesdeSheets = data.sucursalesCerradas || [];
+  objetivosDormidosDesdeSheets = data.objetivosDormidos || [];
 
   // Cargar hoja "% de avance" de Euro: m2 totales por obra + % Avance manual
   // por obra/mes. Usado para calcular FGR y Ton CO2 evitadas/m2.

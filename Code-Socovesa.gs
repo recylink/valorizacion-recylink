@@ -93,6 +93,7 @@ function doPost(e) {
     else if (tipo === 'totalResiduos') writeTotalResiduos(ss, data); // NUEVO 2026-08-28 — hoja "Total Residuos"
     else if (tipo === 'minutas') writeMinutas_(ss, data); // NUEVO — Visor de Minutas
     else if (tipo === 'sucursalesCerradas') writeSucursalesCerradas_(ss, data);
+    else if (tipo === 'objetivosDormidos') writeObjetivosDormidos_(ss, data);
 
     return ContentService
       .createTextOutput(JSON.stringify({ok: true}))
@@ -305,6 +306,41 @@ function readSucursalesCerradasSheet_() {
   if (lastRow < startRow) return [];
   var data = sheet.getRange(startRow, 1, lastRow - startRow + 1, 1).getValues();
   return data.map(function (r) { return String(r[0] || '').trim(); }).filter(function (s) { return s !== ''; });
+}
+
+// "⚙️ Objetivos Dormidos" (a pedido del usuario, 2026-09-15 — mismo
+// problema real que "Sucursales Cerradas": el botón "Objetivos por
+// sucursal" del visor principal se guardaba en localStorage y se perdía si
+// el navegador borraba datos del sitio). Formato: 2 columnas "Sucursal" |
+// "Objetivo", 1 fila por cada combinación dormida — se reemplaza la lista
+// completa cada vez, mismo criterio que Sucursales Cerradas arriba.
+function writeObjetivosDormidos_(ss, data) {
+  var sheet = ss.getSheetByName('⚙️ Objetivos Dormidos');
+  if (!sheet) throw new Error('Hoja "⚙️ Objetivos Dormidos" no encontrada');
+  var headerRow = buscarFilaEncabezado_(sheet, 'Sucursal');
+  if (!headerRow) throw new Error('No se encontro la fila de encabezado ("Sucursal") en Objetivos Dormidos');
+  var startRow = headerRow + 1;
+  var lastRow = sheet.getLastRow();
+  if (lastRow >= startRow) {
+    sheet.getRange(startRow, 1, lastRow - startRow + 1, 2).clearContent();
+  }
+  var filas = data.filas || []; // [[Sucursal, Objetivo], ...]
+  if (filas.length > 0) {
+    sheet.getRange(startRow, 1, filas.length, 2).setValues(filas);
+  }
+}
+function readObjetivosDormidosSheet_() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('⚙️ Objetivos Dormidos');
+  if (!sheet) return [];
+  var headerRow = buscarFilaEncabezado_(sheet, 'Sucursal');
+  if (!headerRow) return [];
+  var startRow = headerRow + 1;
+  var lastRow = sheet.getLastRow();
+  if (lastRow < startRow) return [];
+  var data = sheet.getRange(startRow, 1, lastRow - startRow + 1, 2).getValues();
+  return data.filter(function (r) { return String(r[0] || '').trim() !== ''; }).map(function (r) {
+    return { Sucursal: String(r[0] || '').trim(), Objetivo: String(r[1] || '').trim() };
+  });
 }
 
 
@@ -1355,7 +1391,8 @@ function doGetLegacyYClasico_(e) {
     trazabilidad: readSheet('📊 Trazabilidad_Docs') || readSheet('Trazabilidad_Docs'),
     objetivos: readSheet('🎯 Objetivos') || readSheet('Objetivos'),
     totalResiduos: readTotalResiduosSheet_(),
-    sucursalesCerradas: readSucursalesCerradasSheet_()
+    sucursalesCerradas: readSucursalesCerradasSheet_(),
+    objetivosDormidos: readObjetivosDormidosSheet_()
   };
 
   return ContentService
