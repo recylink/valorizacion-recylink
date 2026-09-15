@@ -1872,7 +1872,7 @@ function autoSync(rows) {
   // sincronizan aparte desde "Editar presupuestos" (btn-guardar-presupuesto-cp),
   // no en cada autoSync(), porque no cambian con cada Excel.
   var filasCostoPresupuesto = costoPresupuestoRows.map(function(r){
-    return [r.suc, r.mes.slice(0,4), MESES_ES[parseInt(r.mes.slice(5))], r.residuo, parseFloat(r.costo.toFixed(2)), parseFloat(r.ingreso.toFixed(2))];
+    return [sucId(r.suc), r.suc, r.mes.slice(0,4), MESES_ES[parseInt(r.mes.slice(5))], r.residuo, parseFloat(r.costo.toFixed(2)), parseFloat(r.ingreso.toFixed(2))];
   });
 
   // Preparar payload trazabilidad
@@ -4084,7 +4084,7 @@ document.getElementById('btn-guardar-presupuesto-cp').addEventListener('click', 
     var val = parseFloat(inp.value);
     if (isNaN(val)) return; // vacio: no se toca lo que ya estaba guardado
     var residuo = cat === 'excavacion' ? 'Excavación' : '';
-    filas.push([suc, '', 'Presupuesto', residuo, val, '']);
+    filas.push([sucId(suc), suc, '', 'Presupuesto', residuo, val, '']);
     // Actualiza el cache local para reflejar el cambio de inmediato, sin
     // esperar a la proxima "Cargar desde Sheets".
     costoPresupuestoDesdeSheets = costoPresupuestoDesdeSheets.filter(function(r){

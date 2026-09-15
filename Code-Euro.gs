@@ -306,36 +306,38 @@ function readTotalResiduosSheet_() {
   });
 }
 
-// Escribe "💰 Costo Presupuesto" (Sucursal | Año | Mes | Residuo | Costo |
-// Ingreso). Dos tipos de fila conviven ahí:
+// Escribe "💰 Costo Presupuesto" (empresa_id | Sucursal | Año | Mes | Residuo
+// | Costo | Ingreso — mismo orden que las otras 3 hojas principales, con
+// empresa_id primero). Dos tipos de fila conviven ahí:
 //  - Detalle mensual: Mes = nombre real (ej. "Marzo"), Año = el año real,
-//    Residuo = el residuo puntual. Clave = Sucursal|Año|Mes (sin Residuo,
+//    Residuo = el residuo puntual. Clave = empresa_id|Año|Mes (sin Residuo,
 //    mismo criterio que Total Residuos): si el Excel nuevo trae un
 //    desglose distinto de residuos para ese mes, se reemplaza completo.
 //  - Presupuesto: Mes = "Presupuesto" (literal), Año vacío (el presupuesto
 //    es de todo el proyecto, no se resetea cada año), Residuo = "Excavación"
-//    o vacío (Residuos). Clave = Sucursal|Presupuesto|Residuo (acá SÍ
+//    o vacío (Residuos). Clave = empresa_id|Presupuesto|Residuo (acá SÍ
 //    importa el Residuo, para no confundir el presupuesto de Excavación
 //    con el de Residuos) — cada categoría es su propia fila permanente.
-function claveCostoPresupuesto_(suc, anio, mes, residuo) {
-  if (mes === 'Presupuesto') return suc + '||' + mes + '||' + residuo;
-  return suc + '||' + anio + '||' + mes;
+function claveCostoPresupuesto_(id, anio, mes, residuo) {
+  if (mes === 'Presupuesto') return id + '||' + mes + '||' + residuo;
+  return id + '||' + anio + '||' + mes;
 }
 function writeCostoPresupuesto(ss, data) {
   var sheet = ss.getSheetByName('💰 Costo Presupuesto');
   if (!sheet) throw new Error('Hoja "💰 Costo Presupuesto" no encontrada');
-  var headerRow = buscarFilaEncabezado_(sheet, 'Sucursal');
-  if (!headerRow) throw new Error('No se encontro la fila de encabezado ("Sucursal") en Costo Presupuesto');
+  var headerRow = buscarFilaEncabezado_(sheet, 'empresa_id');
+  if (!headerRow) throw new Error('No se encontro la fila de encabezado ("empresa_id") en Costo Presupuesto');
   var startRow = headerRow + 1;
   var lastRow = sheet.getLastRow();
 
   if (data.filas && data.filas.length > 0) {
-    var keys = new Set(data.filas.map(function (f) { return claveCostoPresupuesto_(String(f[0]), String(f[1]), String(f[2]), String(f[3])); }));
+    // Columnas: A=empresa_id, B=Sucursal, C=Año, D=Mes, E=Residuo.
+    var keys = new Set(data.filas.map(function (f) { return claveCostoPresupuesto_(String(f[0]), String(f[2]), String(f[3]), String(f[4])); }));
     if (lastRow >= startRow) {
-      var cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 4).getValues();
+      var cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 5).getValues();
       var toDelete = [];
       cols.forEach(function (r, i) {
-        var key = claveCostoPresupuesto_(String(r[0]), String(r[1]), String(r[2]), String(r[3]));
+        var key = claveCostoPresupuesto_(String(r[0]), String(r[2]), String(r[3]), String(r[4]));
         if (keys.has(key)) toDelete.push(startRow + i);
       });
       toDelete.reverse().forEach(function (r) { sheet.deleteRow(r); });
@@ -350,7 +352,7 @@ function writeCostoPresupuesto(ss, data) {
 function readCostoPresupuestoSheet_() {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('💰 Costo Presupuesto');
   if (!sheet) return [];
-  var headerRow = buscarFilaEncabezado_(sheet, 'Sucursal');
+  var headerRow = buscarFilaEncabezado_(sheet, 'empresa_id');
   if (!headerRow) return [];
   var startRow = headerRow + 1;
   var lastRow = sheet.getLastRow();
