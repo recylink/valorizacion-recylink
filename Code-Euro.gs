@@ -79,7 +79,8 @@ function doGet(e) {
     avance: readAvanceSheet_(),
     cse: readCseSheet_(),
     totalResiduos: readTotalResiduosSheet_(),
-    costoPresupuesto: readCostoPresupuestoSheet_()
+    costoPresupuesto: readCostoPresupuestoSheet_(),
+    obrasCerradas: readObrasCerradasSheet_()
   };
 
   return ContentService
@@ -104,6 +105,7 @@ function doPost(e) {
     else if (tipo === 'minutas') writeMinutaSessions_(data.sessions);
     else if (tipo === 'cse') writeCSE_(ss, data);
     else if (tipo === 'm2totales') extra = { noEncontradas: writeM2Totales_(ss, data) };
+    else if (tipo === 'obrasCerradas') writeObrasCerradas_(ss, data);
 
     return ContentService
       .createTextOutput(JSON.stringify(Object.assign({ok: true}, extra)))
@@ -380,6 +382,37 @@ function readCostoPresupuestoSheet_() {
     leido.headers.forEach(function (h, i) { if (h) obj[h] = r[i]; });
     return obj;
   });
+}
+
+// "⚙️ Obras Cerradas" (a pedido del usuario, 2026-09-15: antes se guardaba
+// en localStorage del navegador del visor, y se perdía si el navegador
+// borraba datos del sitio — ver caso real de "objetivos dormidos" ya visto
+// en esta misma sesión). Formato simple: 1 columna "Sucursal", 1 fila por
+// obra cerrada. writeObrasCerradas_ reemplaza la lista completa cada vez
+// (el cliente siempre manda el set vigente completo, no hay nada que
+// preservar entre syncs — a diferencia de Total Residuos/Costo Presupuesto,
+// acá no hay concepto de "mes" ni de historial, solo un estado on/off).
+function writeObrasCerradas_(ss, data) {
+  var sheet = ss.getSheetByName('⚙️ Obras Cerradas');
+  if (!sheet) throw new Error('Hoja "⚙️ Obras Cerradas" no encontrada');
+  var headerRow = buscarFilaEncabezado_(sheet, 'Sucursal');
+  if (!headerRow) throw new Error('No se encontro la fila de encabezado ("Sucursal") en Obras Cerradas');
+  var startRow = headerRow + 1;
+  var lastRow = sheet.getLastRow();
+  if (lastRow >= startRow) {
+    sheet.getRange(startRow, 1, lastRow - startRow + 1, 1).clearContent();
+  }
+  var sucursales = data.sucursales || [];
+  if (sucursales.length > 0) {
+    sheet.getRange(startRow, 1, sucursales.length, 1).setValues(sucursales.map(function (s) { return [s]; }));
+  }
+}
+function readObrasCerradasSheet_() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('⚙️ Obras Cerradas');
+  if (!sheet) return [];
+  var leido = leerHojaConEncabezado_(sheet, 'Sucursal');
+  if (!leido) return [];
+  return leido.data.map(function (r) { return String(r[0] || '').trim(); }).filter(function (s) { return s !== ''; });
 }
 
 // Lee la hoja RESPEL (Residuo -> TRUE/FALSE) como array de objetos, igual
