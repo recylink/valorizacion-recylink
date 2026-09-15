@@ -73,14 +73,26 @@ function writeValorizacion(ss, data) {
   const startRow = 6;
   const lastRow = sheet.getLastRow();
   if (lastRow >= startRow) {
-    // Borrar por empresa_id+Tipo (no solo empresa_id): si el cliente no manda
-    // la fila "Meta %" (porque todavía no conoce el valor real), esta no debe
-    // borrarse — antes se borraban las 3 filas (% Real/% Acumulado/Meta %) por
-    // cualquier coincidencia de empresa_id, perdiendo la meta ya guardada.
-    const cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 3).getValues();
-    const keys = new Set(data.filas.map(f => f[0] + '|' + f[2]));
+    // Borrar por empresa_id+Tipo+Año (no solo empresa_id+Tipo): si el cliente
+    // no manda la fila "Meta %" (porque todavía no conoce el valor real),
+    // esta no debe borrarse — antes se borraban las 3 filas (% Real/%
+    // Acumulado/Meta %) por cualquier coincidencia de empresa_id, perdiendo
+    // la meta ya guardada. Se agrega Año (2026-09-15, columna D activada
+    // recién ahora) para no pisar/borrar el % Real de un año al sincronizar
+    // otro — antes de esto, "2025" y "2026" de la misma sucursal eran
+    // indistinguibles por empresa_id+Tipo y un sync borraba al otro.
+    // Migración: las filas viejas (de antes de este cambio) tienen Año en
+    // blanco — se borran igual la primera vez que llega una fila nueva con
+    // el mismo empresa_id+Tipo (sin importar qué año traiga esa fila nueva),
+    // para no dejarlas duplicadas conviviendo con las nuevas ya fechadas.
+    const cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 4).getValues();
+    const keysConAnio = new Set(data.filas.map(f => f[0] + '|' + f[2] + '|' + f[3]));
+    const keysSinAnio = new Set(data.filas.map(f => f[0] + '|' + f[2]));
     const toDelete = [];
-    cols.forEach((r, i) => { if (keys.has(r[0] + '|' + r[2])) toDelete.push(startRow + i); });
+    cols.forEach((r, i) => {
+      const esFilaVieja = r[3] === '' || r[3] === undefined || r[3] === null;
+      if (keysConAnio.has(r[0] + '|' + r[2] + '|' + r[3]) || (esFilaVieja && keysSinAnio.has(r[0] + '|' + r[2]))) toDelete.push(startRow + i);
+    });
     toDelete.reverse().forEach(r => sheet.deleteRow(r));
   }
   const insertRow = sheet.getLastRow() + 1;
@@ -117,10 +129,20 @@ function writeTrazabilidad(ss, data) {
   const startRow = 6;
   const lastRow = sheet.getLastRow();
   if (lastRow >= startRow) {
-    const cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 3).getValues();
-    const keys = new Set(data.filas.map(f => f[0] + '|' + f[2]));
+    // Borrar por empresa_id+Mes+Año (2026-09-15, columna D activada recién
+    // ahora) — sin Año, "Enero" de 2025 y "Enero" de 2026 de la misma
+    // sucursal eran indistinguibles y un sync borraba al otro. Migración:
+    // filas viejas con Año en blanco se borran igual la primera vez que
+    // llega una fila nueva con el mismo empresa_id+Mes (cualquier año),
+    // mismo criterio que writeValorizacion arriba.
+    const cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 4).getValues();
+    const keysConAnio = new Set(data.filas.map(f => f[0] + '|' + f[2] + '|' + f[3]));
+    const keysSinAnio = new Set(data.filas.map(f => f[0] + '|' + f[2]));
     const toDelete = [];
-    cols.forEach((r, i) => { if (keys.has(r[0] + '|' + r[2])) toDelete.push(startRow + i); });
+    cols.forEach((r, i) => {
+      const esFilaVieja = r[3] === '' || r[3] === undefined || r[3] === null;
+      if (keysConAnio.has(r[0] + '|' + r[2] + '|' + r[3]) || (esFilaVieja && keysSinAnio.has(r[0] + '|' + r[2]))) toDelete.push(startRow + i);
+    });
     toDelete.reverse().forEach(r => sheet.deleteRow(r));
   }
   const insertRow = sheet.getLastRow() + 1;
@@ -139,10 +161,23 @@ function writeObjetivos(ss, data) {
   const startRow = 6;
   const lastRow = sheet.getLastRow();
   if (lastRow >= startRow) {
-    const cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 3).getValues();
-    const keys = new Set(data.filas.map(f => f[0] + '|' + f[2]));
+    // Borrar por empresa_id+Mes+Año (2026-09-15, columna D activada recién
+    // ahora) — mismo motivo que writeTrazabilidad/writeValorizacion arriba.
+    // Las filas "Anual" mandan Año='' (ver anioObj en el cliente): siguen
+    // matcheando bien por la clave exacta de abajo (todas comparten esa
+    // clave vacía, que es justo lo que se quiere: no distinguen año). El
+    // fallback "fila vieja" solo importa para las filas MENSUALES viejas
+    // (con nombre de mes real, ej. "Marzo") que quedaron con Año en blanco
+    // antes de este cambio — se borran la primera vez que llega una fila
+    // nueva con el mismo empresa_id+Mes, sin importar qué año traiga.
+    const cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 4).getValues();
+    const keysConAnio = new Set(data.filas.map(f => f[0] + '|' + f[2] + '|' + f[3]));
+    const keysSinAnio = new Set(data.filas.map(f => f[0] + '|' + f[2]));
     const toDelete = [];
-    cols.forEach((r, i) => { if (keys.has(r[0] + '|' + r[2])) toDelete.push(startRow + i); });
+    cols.forEach((r, i) => {
+      const esFilaVieja = r[3] === '' || r[3] === undefined || r[3] === null;
+      if (keysConAnio.has(r[0] + '|' + r[2] + '|' + r[3]) || (esFilaVieja && keysSinAnio.has(r[0] + '|' + r[2]))) toDelete.push(startRow + i);
+    });
     toDelete.reverse().forEach(r => sheet.deleteRow(r));
   }
   const insertRow = sheet.getLastRow() + 1;

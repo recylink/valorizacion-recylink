@@ -631,13 +631,18 @@ var META_VAL_OBJ_NOMBRE = '% Valorización vs. meta';
 // "Objetivo", etc.) — ver Code-Ando-Visor.gs, leerObjetivosReales_. Al
 // agregar 'ando' acá, autoSync() empieza a escribir la columna Año de
 // verdad y el corrimiento se autocorrige solo en el próximo sync.
-var EMPRESAS_OBJ_CON_ANIO = {euro:1, socovesa:1, gespania:1, vital:1, ando:1, londres:1};
+// Salfa (2026-09-15): mismo caso, header "Año" en 🎯 Objetivos sin usar
+// (confirmado con dumpHeaders() contra el Sheet real: empresa_id, Sucursal,
+// Mes, Año, Objetivo, % cumplimiento, Detalle — mismo orden que el resto).
+var EMPRESAS_OBJ_CON_ANIO = {euro:1, socovesa:1, gespania:1, vital:1, ando:1, londres:1, salfa:1};
 // Mismo caso para la hoja "♻️ Valorización": Euro, Socovesa y (desde
 // 2026-08-31) Gespania tienen una columna Año agregada (empresa_id,
 // Sucursal, Tipo, Año, ene%, feb%, ...) en vez del formato original sin
 // Año — ver Code-Socovesa.gs FIX 3. Ando tenía el mismo header "Año" sin
 // usar (mismo corrimiento de columnas que en Objetivos, ver nota arriba).
-var EMPRESAS_VAL_CON_ANIO = {euro:1, socovesa:1, gespania:1, vital:1, ando:1, londres:1};
+// Salfa (2026-09-15): mismo caso, header "Año" en ♻️ Valorización sin usar
+// (confirmado con dumpHeaders(): empresa_id, Sucursal, Tipo, Año, Enero..Diciembre).
+var EMPRESAS_VAL_CON_ANIO = {euro:1, socovesa:1, gespania:1, vital:1, ando:1, londres:1, salfa:1};
 
 var ABASTIBLE_METAS = {
   'Planta Concón': 15,
@@ -1846,8 +1851,16 @@ function autoSync(rows) {
   // Cert. declaración, Transportista, Disposición final, Comentario por
   // sucursal.
   var esLondresTraz = empresaActual === 'londres';
+  // Salfa (2026-09-15): mismo caso que Ando/Vital/Londres — header "Año" en
+  // 📊 Trazabilidad_Docs sin usar, mismo orden de columnas confirmado con
+  // dumpHeaders() contra el Sheet real: empresa_id, Sucursal, Mes, Año,
+  // Residuo, Código LER, Importaciones, Cert. tratamiento, Factura, Cert.
+  // declaración, Transportista, Disposición final, Comentario por sucursal
+  // (coincide con emp.trazCols de Salfa hasta "Disp. final"; "Comentario por
+  // sucursal" queda fuera del array como con Vital/Londres, sin tocarse).
+  var esSalfaTraz = empresaActual === 'salfa';
   var filasTraz = trazRows.map(function(r){
-    if (esEuroTraz || esGespaniaTraz || esVitalTraz || esAndoTraz || esLondresTraz) {
+    if (esEuroTraz || esGespaniaTraz || esVitalTraz || esAndoTraz || esLondresTraz || esSalfaTraz) {
       return [sucId(r.suc), r.suc, MESES_ES[parseInt(r.mes.slice(5))], r.mes.slice(0,4), r.residuo, r.ler, r.imp, r.cert, r.factura, r.decl, r.transp, r.disp];
     }
     if (esSocovesaTraz) {
