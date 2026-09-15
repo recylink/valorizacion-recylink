@@ -58,8 +58,12 @@ function doGet(e) {
   function readSheet(nombre) {
     const sheet = ss.getSheetByName(nombre);
     if (!sheet || sheet.getLastRow() < startRow) return [];
-    const headers = sheet.getRange(5, 1, 1, sheet.getLastColumn()).getValues()[0];
-    const data = sheet.getRange(startRow, 1, sheet.getLastRow() - startRow + 1, sheet.getLastColumn()).getValues();
+    // 1 sola lectura (fila 5 en adelante) en vez de 2 (header aparte + datos
+    // aparte) — mismo motivo que leerHojaConEncabezado_ más abajo: menos
+    // llamadas a Sheets, mismo resultado.
+    const valores = sheet.getRange(5, 1, sheet.getLastRow() - 5 + 1, sheet.getLastColumn()).getValues();
+    const headers = valores[0];
+    const data = valores.slice(1);
     return data.filter(r => r[0] !== '').map(r => {
       const obj = {};
       headers.forEach((h, i) => { obj[h] = r[i]; });
@@ -244,6 +248,29 @@ function buscarFilaEncabezado_(sheet, valorEsperado) {
   return null;
 }
 
+// OPTIMIZACIÓN (2026-09-15, a pedido del usuario: "se tarda en cargar"):
+// las hojas con encabezado dinámico (RESPEL, Total Residuos, Costo
+// Presupuesto, Seguimiento_CSE) hacían 3 llamadas a Sheets por lectura —
+// buscarFilaEncabezado_ (columna A, hasta 20 filas) + una lectura aparte de
+// la fila de encabezado + otra de los datos. Cada llamada a getValues()
+// tiene overhead fijo de red/cuota en Apps Script, sin importar cuánto lea
+// — con 8 hojas leídas en cada doGet, esas llamadas de más se notaban.
+// Esta función junta las 3 en 1 sola lectura de toda la hoja, encuentra el
+// encabezado en memoria y devuelve headers/data ya separados.
+function leerHojaConEncabezado_(sheet, valorEsperadoColA) {
+  var lastRow = sheet.getLastRow();
+  var lastCol = sheet.getLastColumn();
+  if (lastRow < 1 || lastCol < 1) return null;
+  var valores = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+  var headerIdx = -1;
+  var max = Math.min(valores.length, 20);
+  for (var i = 0; i < max; i++) {
+    if (String(valores[i][0] || '').trim() === valorEsperadoColA) { headerIdx = i; break; }
+  }
+  if (headerIdx === -1) return null;
+  return { headers: valores[headerIdx], data: valores.slice(headerIdx + 1) };
+}
+
 // Reemplaza SOLO las filas de "Total Residuos" cuya Sucursal+Año+Mes
 // coincide con lo que trae el Excel recién cargado — igual criterio que
 // writeValorizacion/writeTrazabilidad/writeObjetivos (borrado selectivo
@@ -291,17 +318,11 @@ function writeTotalResiduos(ss, data) {
 function readTotalResiduosSheet_() {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Total Residuos');
   if (!sheet) return [];
-  var headerRow = buscarFilaEncabezado_(sheet, 'Sucursal');
-  if (!headerRow) return [];
-  var startRow = headerRow + 1;
-  var lastRow = sheet.getLastRow();
-  if (lastRow < startRow) return [];
-  var lastCol = sheet.getLastColumn();
-  var headers = sheet.getRange(headerRow, 1, 1, lastCol).getValues()[0];
-  var data = sheet.getRange(startRow, 1, lastRow - startRow + 1, lastCol).getValues();
-  return data.filter(function (r) { return String(r[0] || '').trim() !== ''; }).map(function (r) {
+  var leido = leerHojaConEncabezado_(sheet, 'Sucursal');
+  if (!leido) return [];
+  return leido.data.filter(function (r) { return String(r[0] || '').trim() !== ''; }).map(function (r) {
     var obj = {};
-    headers.forEach(function (h, i) { if (h) obj[h] = r[i]; });
+    leido.headers.forEach(function (h, i) { if (h) obj[h] = r[i]; });
     return obj;
   });
 }
@@ -352,17 +373,11 @@ function writeCostoPresupuesto(ss, data) {
 function readCostoPresupuestoSheet_() {
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('💰 Costo Presupuesto');
   if (!sheet) return [];
-  var headerRow = buscarFilaEncabezado_(sheet, 'empresa_id');
-  if (!headerRow) return [];
-  var startRow = headerRow + 1;
-  var lastRow = sheet.getLastRow();
-  if (lastRow < startRow) return [];
-  var lastCol = sheet.getLastColumn();
-  var headers = sheet.getRange(headerRow, 1, 1, lastCol).getValues()[0];
-  var data = sheet.getRange(startRow, 1, lastRow - startRow + 1, lastCol).getValues();
-  return data.filter(function (r) { return String(r[0] || '').trim() !== ''; }).map(function (r) {
+  var leido = leerHojaConEncabezado_(sheet, 'empresa_id');
+  if (!leido) return [];
+  return leido.data.filter(function (r) { return String(r[0] || '').trim() !== ''; }).map(function (r) {
     var obj = {};
-    headers.forEach(function (h, i) { if (h) obj[h] = r[i]; });
+    leido.headers.forEach(function (h, i) { if (h) obj[h] = r[i]; });
     return obj;
   });
 }
@@ -370,19 +385,13 @@ function readCostoPresupuestoSheet_() {
 // Lee la hoja RESPEL (Residuo -> TRUE/FALSE) como array de objetos, igual
 // formato que las otras hojas.
 function readRespelSheet_() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName('RESPEL');
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('RESPEL');
   if (!sheet) return [];
-  var headerRow = buscarFilaEncabezado_(sheet, 'Residuo');
-  if (!headerRow) return [];
-  var startRow = headerRow + 1;
-  var lastRow = sheet.getLastRow();
-  if (lastRow < startRow) return [];
-  var headers = sheet.getRange(headerRow, 1, 1, sheet.getLastColumn()).getValues()[0];
-  var data = sheet.getRange(startRow, 1, lastRow - startRow + 1, sheet.getLastColumn()).getValues();
-  return data.filter(function (r) { return r[0] !== ''; }).map(function (r) {
+  var leido = leerHojaConEncabezado_(sheet, 'Residuo');
+  if (!leido) return [];
+  return leido.data.filter(function (r) { return r[0] !== ''; }).map(function (r) {
     var obj = {};
-    headers.forEach(function (h, i) { if (h) obj[h] = r[i]; });
+    leido.headers.forEach(function (h, i) { if (h) obj[h] = r[i]; });
     return obj;
   });
 }
@@ -395,17 +404,19 @@ function readRespelSheet_() {
 // obra: "% Avance" ingresado a mano, "FGR" y "CO2ev/m2" calculados por el
 // visor).
 function readAvanceSheet_() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName('%avance') || ss.getSheetByName('% de avance');
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('%avance') || SpreadsheetApp.getActiveSpreadsheet().getSheetByName('% de avance');
   if (!sheet) return { m2Totales: {}, filas: [] };
 
   var lastCol = sheet.getLastColumn();
   var lastRow = sheet.getLastRow();
+  if (lastRow < 1 || lastCol < 1) return { m2Totales: {}, filas: [] };
+  // 1 sola lectura de toda la hoja en vez de 4 (fila1, fila2, headers, data
+  // por separado) — ver leerHojaConEncabezado_ arriba, mismo motivo.
+  var valores = sheet.getRange(1, 1, lastRow, lastCol).getValues();
 
   var m2Totales = {};
-  if (lastRow >= 2 && lastCol >= 2) {
-    var fila1 = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
-    var fila2 = sheet.getRange(2, 1, 1, lastCol).getValues()[0];
+  if (valores.length >= 2 && lastCol >= 2) {
+    var fila1 = valores[0], fila2 = valores[1];
     for (var c = 1; c < lastCol; c++) {
       var suc = String(fila1[c] || '').trim();
       if (!suc) continue;
@@ -415,12 +426,11 @@ function readAvanceSheet_() {
     }
   }
 
-  var headerRow = 4, startRow = 5;
+  var headerIdx = 3, startIdx = 4; // fila 4 y fila 5, 0-based
   var filas = [];
-  if (lastRow >= startRow) {
-    var headers = sheet.getRange(headerRow, 1, 1, lastCol).getValues()[0];
-    var data = sheet.getRange(startRow, 1, lastRow - startRow + 1, lastCol).getValues();
-    data.forEach(function (r) {
+  if (valores.length > startIdx) {
+    var headers = valores[headerIdx];
+    valores.slice(startIdx).forEach(function (r) {
       if (String(r[1] || '').trim() === '') return;
       var obj = {};
       headers.forEach(function (h, i) { if (h) obj[h] = r[i]; });
@@ -535,20 +545,13 @@ function writeM2Totales_(ss, data) {
 // SI/NO por mes. Sin columna Año — el cliente asume el año actual, mismo
 // criterio que ya usa el resto del sistema para hojas sin esa columna.
 function readCseSheet_() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName('👥 Seguimiento_CSE') || ss.getSheetByName('Seguimiento_CSE');
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('👥 Seguimiento_CSE') || SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Seguimiento_CSE');
   if (!sheet) return [];
-  var headerRow = buscarFilaEncabezado_(sheet, 'empresa_id');
-  if (!headerRow) return [];
-  var startRow = headerRow + 1;
-  var lastRow = sheet.getLastRow();
-  if (lastRow < startRow) return [];
-  var lastCol = sheet.getLastColumn();
-  var headers = sheet.getRange(headerRow, 1, 1, lastCol).getValues()[0];
-  var data = sheet.getRange(startRow, 1, lastRow - startRow + 1, lastCol).getValues();
-  return data.filter(function (r) { return String(r[1] || '').trim() !== ''; }).map(function (r) {
+  var leido = leerHojaConEncabezado_(sheet, 'empresa_id');
+  if (!leido) return [];
+  return leido.data.filter(function (r) { return String(r[1] || '').trim() !== ''; }).map(function (r) {
     var obj = {};
-    headers.forEach(function (h, i) { if (h) obj[h] = r[i]; });
+    leido.headers.forEach(function (h, i) { if (h) obj[h] = r[i]; });
     return obj;
   });
 }
