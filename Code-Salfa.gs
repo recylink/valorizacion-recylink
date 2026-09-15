@@ -90,7 +90,7 @@ function writeValorizacion(ss, data) {
     const keysSinAnio = new Set(data.filas.map(f => f[0] + '|' + f[2]));
     const toDelete = [];
     cols.forEach((r, i) => {
-      const esFilaVieja = r[3] === '' || r[3] === undefined || r[3] === null;
+      const esFilaVieja = r[3] === '' || r[3] === undefined || r[3] === null || r[3] === 0;
       if (keysConAnio.has(r[0] + '|' + r[2] + '|' + r[3]) || (esFilaVieja && keysSinAnio.has(r[0] + '|' + r[2]))) toDelete.push(startRow + i);
     });
     toDelete.reverse().forEach(r => sheet.deleteRow(r));
@@ -140,7 +140,7 @@ function writeTrazabilidad(ss, data) {
     const keysSinAnio = new Set(data.filas.map(f => f[0] + '|' + f[2]));
     const toDelete = [];
     cols.forEach((r, i) => {
-      const esFilaVieja = r[3] === '' || r[3] === undefined || r[3] === null;
+      const esFilaVieja = r[3] === '' || r[3] === undefined || r[3] === null || r[3] === 0;
       if (keysConAnio.has(r[0] + '|' + r[2] + '|' + r[3]) || (esFilaVieja && keysSinAnio.has(r[0] + '|' + r[2]))) toDelete.push(startRow + i);
     });
     toDelete.reverse().forEach(r => sheet.deleteRow(r));
@@ -175,7 +175,7 @@ function writeObjetivos(ss, data) {
     const keysSinAnio = new Set(data.filas.map(f => f[0] + '|' + f[2]));
     const toDelete = [];
     cols.forEach((r, i) => {
-      const esFilaVieja = r[3] === '' || r[3] === undefined || r[3] === null;
+      const esFilaVieja = r[3] === '' || r[3] === undefined || r[3] === null || r[3] === 0;
       if (keysConAnio.has(r[0] + '|' + r[2] + '|' + r[3]) || (esFilaVieja && keysSinAnio.has(r[0] + '|' + r[2]))) toDelete.push(startRow + i);
     });
     toDelete.reverse().forEach(r => sheet.deleteRow(r));
