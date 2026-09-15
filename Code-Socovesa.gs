@@ -92,6 +92,7 @@ function doPost(e) {
     else if (tipo === 'objetivos') writeObjetivos(ss, data);
     else if (tipo === 'totalResiduos') writeTotalResiduos(ss, data); // NUEVO 2026-08-28 — hoja "Total Residuos"
     else if (tipo === 'minutas') writeMinutas_(ss, data); // NUEVO — Visor de Minutas
+    else if (tipo === 'sucursalesCerradas') writeSucursalesCerradas_(ss, data);
 
     return ContentService
       .createTextOutput(JSON.stringify({ok: true}))
@@ -271,6 +272,41 @@ function readTotalResiduosSheet_() {
   });
 }
 
+// "⚙️ Sucursales Cerradas" (a pedido del usuario, 2026-09-15): fuente única
+// compartida entre el visor principal (valorizacion-recylink.html, vía el
+// doGet clásico) y el visor standalone (?visor=1, buildPayload_) para
+// ocultar obras cerradas SIN dejar de guardar su historial. Formato simple:
+// 1 columna "Sucursal", 1 fila por obra cerrada — se reemplaza la lista
+// completa cada vez (no hay concepto de historial/mes acá, solo un estado
+// on/off vigente), mismo criterio que "💰 Costo Presupuesto"/"Total
+// Residuos" para las claves de sync, pero sin necesidad de eso acá.
+function writeSucursalesCerradas_(ss, data) {
+  var sheet = ss.getSheetByName('⚙️ Sucursales Cerradas');
+  if (!sheet) throw new Error('Hoja "⚙️ Sucursales Cerradas" no encontrada');
+  var headerRow = buscarFilaEncabezado_(sheet, 'Sucursal');
+  if (!headerRow) throw new Error('No se encontro la fila de encabezado ("Sucursal") en Sucursales Cerradas');
+  var startRow = headerRow + 1;
+  var lastRow = sheet.getLastRow();
+  if (lastRow >= startRow) {
+    sheet.getRange(startRow, 1, lastRow - startRow + 1, 1).clearContent();
+  }
+  var sucursales = data.sucursales || [];
+  if (sucursales.length > 0) {
+    sheet.getRange(startRow, 1, sucursales.length, 1).setValues(sucursales.map(function (s) { return [s]; }));
+  }
+}
+function readSucursalesCerradasSheet_() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('⚙️ Sucursales Cerradas');
+  if (!sheet) return [];
+  var headerRow = buscarFilaEncabezado_(sheet, 'Sucursal');
+  if (!headerRow) return [];
+  var startRow = headerRow + 1;
+  var lastRow = sheet.getLastRow();
+  if (lastRow < startRow) return [];
+  var data = sheet.getRange(startRow, 1, lastRow - startRow + 1, 1).getValues();
+  return data.map(function (r) { return String(r[0] || '').trim(); }).filter(function (s) { return s !== ''; });
+}
+
 
 // ============================================================
 // VISOR DE MINUTAS — lectura/escritura de la pestaña "Minuta"
@@ -447,6 +483,16 @@ function buildPayload_(anioParam) {
   var empresas = construirEmpresas_(traza, val, cse, objetivosPorEmpresa, objetivosMaestro, totalResiduosPorEmpresa);
   var mesesActivos = calcularMesesActivos_(traza, val, cse);
 
+  // Sucursales cerradas (a pedido del usuario, 2026-09-15): misma lista que
+  // usa el visor principal (ver readSucursalesCerradasSheet_/doGetLegacyYClasico_
+  // más abajo) — una obra marcada como cerrada no se muestra acá tampoco,
+  // sin perder su historial (sigue en el Sheet, solo se filtra al armar el
+  // payload de este visor).
+  var sucursalesCerradas = readSucursalesCerradasSheet_();
+  if (sucursalesCerradas.length > 0) {
+    empresas = empresas.filter(function (e) { return sucursalesCerradas.indexOf(e.sucursal) === -1; });
+  }
+
   // FGR (a pedido del usuario, 2026-08-28): la tabla comparativa debe
   // mostrar TODAS las obras sin importar el año seleccionado, aunque el
   // sidebar (EMPRESAS) SI este filtrado por año — se arma por separado a
@@ -457,7 +503,7 @@ function buildPayload_(anioParam) {
       sucursal: traza.todasLasSucursales[empId],
       fgr: construirFgrInfo_(empId, totalResiduosPorEmpresa)
     };
-  });
+  }).filter(function (o) { return sucursalesCerradas.indexOf(o.sucursal) === -1; });
 
   return {
     generatedAt: new Date().toISOString(),
@@ -1291,7 +1337,8 @@ function doGetLegacyYClasico_(e) {
     valorizacion: readSheet('♻️ Valorización') || readSheet('Valorización'),
     trazabilidad: readSheet('📊 Trazabilidad_Docs') || readSheet('Trazabilidad_Docs'),
     objetivos: readSheet('🎯 Objetivos') || readSheet('Objetivos'),
-    totalResiduos: readTotalResiduosSheet_()
+    totalResiduos: readTotalResiduosSheet_(),
+    sucursalesCerradas: readSucursalesCerradasSheet_()
   };
 
   return ContentService

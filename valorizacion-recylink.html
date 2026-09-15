@@ -1290,7 +1290,15 @@ var SUCURSALES_EXCLUIDAS = ['Edificio Eliodoro Yañez','Edificio Eliodoro Yanez'
 // (guardadas en localStorage, por empresa, ya que un mismo nombre de sucursal podria
 // repetirse entre empresas distintas). Se suman a SUCURSALES_EXCLUIDAS (que sigue
 // existiendo para casos ya conocidos que no requieren edicion desde la UI).
+// EXCEPCION Socovesa (2026-09-15, a pedido del usuario): en vez de localStorage
+// (que se pierde si el navegador borra datos del sitio, y no se comparte con el
+// visor standalone socovesa-trazabilidad), se guarda en la hoja "⚙️ Sucursales
+// Cerradas" — sucursalesCerradasDesdeSheets se llena en loadSheetsData() desde
+// data.sucursalesCerradas, y ese mismo Sheet lo lee el visor standalone (ver
+// Code-Socovesa.gs, readSucursalesCerradasSheet_/buildPayload_).
+var sucursalesCerradasDesdeSheets = [];
 function getSucursalesExcluidasUI(companyId) {
+  if ((companyId || empresaActual) === 'socovesa') return sucursalesCerradasDesdeSheets;
   try {
     var raw = localStorage.getItem('sucursales_excluidas');
     var all = raw ? JSON.parse(raw) : {};
@@ -1298,6 +1306,15 @@ function getSucursalesExcluidasUI(companyId) {
   } catch(e) { return []; }
 }
 function setSucursalesExcluidasUI(lista) {
+  if (empresaActual === 'socovesa') {
+    sucursalesCerradasDesdeSheets = lista; // refleja el cambio de inmediato, sin esperar la red
+    fetch(EMPRESAS.socovesa.scriptUrl, {
+      method:'POST', mode:'no-cors',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({tipo:'sucursalesCerradas', sucursales: lista})
+    }).catch(function(){});
+    return;
+  }
   var raw = localStorage.getItem('sucursales_excluidas');
   var all = {};
   try { all = raw ? JSON.parse(raw) : {}; } catch(e) { all = {}; }
@@ -3228,6 +3245,7 @@ function loadSheetsData(data) {
   acumFromSheets = {};
   totalResiduosDesdeSheets = data.totalResiduos || [];
   costoPresupuestoDesdeSheets = data.costoPresupuesto || [];
+  sucursalesCerradasDesdeSheets = data.sucursalesCerradas || [];
 
   // Cargar hoja "% de avance" de Euro: m2 totales por obra + % Avance manual
   // por obra/mes. Usado para calcular FGR y Ton CO2 evitadas/m2.
