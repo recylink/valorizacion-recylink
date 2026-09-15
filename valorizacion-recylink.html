@@ -1633,11 +1633,11 @@ function processData(rows, fname) {
     // se excluyen de trazabilidad, solo del % de valorizacion.
     var esEscombroArena = esAcciona && (normResiduo(residuo) === 'escombro' || normResiduo(residuo) === 'arena');
     var excluirDeVal = (esCopec && respel) || esExcavacion || esEscombroArena;
-    // Euro y Acciona miden % de valorizacion por volumen (m3) en vez de peso
-    // (kg) — excepcion agregada para Acciona 2026-08-19, a pedido del
-    // usuario, mismo mecanismo ya usado para Euro. El resto de las empresas
-    // sigue usando kg sin cambios.
-    var metricaVal = (esEuro || esAcciona) ? m3 : kg;
+    // Euro, Acciona y Socovesa miden % de valorizacion por volumen (m3) en
+    // vez de peso (kg) — excepcion agregada para Acciona 2026-08-19 y para
+    // Socovesa 2026-09-15 (a pedido del usuario), mismo mecanismo ya usado
+    // para Euro. El resto de las empresas sigue usando kg sin cambios.
+    var metricaVal = (esEuro || esAcciona || esSocovesa) ? m3 : kg;
     if (!excluirDeVal) {
       valMatrix[suc][mes].total+=metricaVal;
       if (valorizado) valMatrix[suc][mes].val+=metricaVal;
@@ -2121,7 +2121,7 @@ function getPct(suc,mes){
 // excavación removida al iniciar el proyecto, lo que diluía el % para
 // obras con harta excavación sin valorizar.
 function kgRealPorMesSuc_(suc) {
-  var esM3 = empresaActual === 'euro' || empresaActual === 'acciona'; // mismo criterio que metricaVal en processData()
+  var esM3 = empresaActual === 'euro' || empresaActual === 'acciona' || empresaActual === 'socovesa'; // mismo criterio que metricaVal en processData()
   var porMes = {};
   totalResiduosDesdeSheets.forEach(function(r){
     if (((r['Sucursal']||'')+'') !== suc) return;
