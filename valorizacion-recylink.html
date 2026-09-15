@@ -976,6 +976,21 @@ function calcSaludEmpresa_(companyId, data, anio) {
   var emp = EMPRESAS[companyId];
   var valInfo = parseValorizacionRows_(data.valorizacion);
   var objInfo = parseObjetivosRows_(data.objetivos);
+  // Migración histórica (Salfa): "segregacion_anual" era mensual antes de
+  // pasar a anual — ver comentario igual en renderCopecObjetivos(). Sin esto,
+  // el panel de Salud puntuaría 0 para una sucursal que en realidad ya había
+  // cumplido el objetivo en algún mes viejo, antes del cambio de tipo.
+  (emp.objetivos || []).forEach(function(o){
+    if (o.tipo !== 'segregacion_anual') return;
+    Object.keys(objInfo.objBySucMes).forEach(function(k){
+      var suc2 = k.slice(0, k.indexOf('|'));
+      if (k.slice(k.lastIndexOf('|') + 1) !== o.nombre) return;
+      if (objInfo.objAnualBySuc[suc2 + '|' + o.nombre]) return;
+      if (objInfo.objBySucMes[k].estado === 'OK') {
+        objInfo.objAnualBySuc[suc2 + '|' + o.nombre] = {suc:suc2, obj:o.nombre, estado:'OK', detalle:objInfo.objBySucMes[k].detalle};
+      }
+    });
+  });
   var metas = resolveMetaEmpresa_(companyId, valInfo.sucursales, valInfo.metaFromSheet);
   // Ediciones manuales de esta sesion (ver guardarObjetivoManual): por si
   // este calculo corre antes de que el Sheet ya refleje el ultimo guardado.
@@ -3444,6 +3459,31 @@ function renderCopecObjetivos() {
     Object.assign(objAnualBySuc, parsedObj.objAnualBySuc);
     Object.assign(objBySucMes, parsedObj.objBySucMes);
   }
+
+  // Migración histórica (Salfa): "segregacion_anual" era un objetivo MENSUAL
+  // antes de pasar a ser anual — el Sheet "🎯 Objetivos" puede tener filas
+  // viejas mes a mes para este objetivo (Mes="Marzo", etc.) en vez de una
+  // fila "Anual" (parseObjetivosRows_ solo llena objAnualBySuc cuando
+  // Mes==='Anual', así que esas filas viejas quedaron en objBySucMes y nunca
+  // se ven en la tabla "Análisis anual"). Caso real (Inoval Brisas de San
+  // Pedro, 2026-09-15): sin Excel nuevo esta sesión y sin nada en Total
+  // Residuos (ver sucTieneTotalResiduos_ más abajo), el objetivo se veía
+  // vacío pese a que Marzo/Abril ya habían sido "OK" (con "Madera"). Se
+  // reconstruye el estado anual desde esas filas mensuales viejas: OK si
+  // algún mes fue OK.
+  (emp.objetivos || []).forEach(function(o){
+    if (o.tipo !== 'segregacion_anual') return;
+    sucursales.forEach(function(suc){
+      if (objAnualBySuc[suc + '|' + o.nombre]) return;
+      var detalleOk = null;
+      Object.keys(objBySucMes).forEach(function(k){
+        if (k.indexOf(suc + '|') !== 0 || k.slice(k.lastIndexOf('|') + 1) !== o.nombre) return;
+        if (objBySucMes[k].estado === 'OK') detalleOk = objBySucMes[k].detalle;
+      });
+      if (detalleOk === null) return;
+      objAnualBySuc[suc + '|' + o.nombre] = {suc:suc, mes:'Anual', mesKey:'anual', obj:o.nombre, estado:'OK', detalle:detalleOk, anual:true};
+    });
+  });
 
   // Objetivos de presencia/valorización de residuos SIEMPRE se recalculan
   // en vivo desde Total Residuos (ver residuosValorizadosDeSuc_/
