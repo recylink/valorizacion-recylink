@@ -308,39 +308,82 @@ function readSucursalesCerradasSheet_() {
   return data.map(function (r) { return String(r[0] || '').trim(); }).filter(function (s) { return s !== ''; });
 }
 
-// "⚙️ Objetivos Dormidos" (a pedido del usuario, 2026-09-15 — mismo
-// problema real que "Sucursales Cerradas": el botón "Objetivos por
-// sucursal" del visor principal se guardaba en localStorage y se perdía si
-// el navegador borraba datos del sitio). Formato: 2 columnas "Sucursal" |
-// "Objetivo", 1 fila por cada combinación dormida — se reemplaza la lista
-// completa cada vez, mismo criterio que Sucursales Cerradas arriba.
+// "Objetivos 2026" como matriz Sucursal × Objetivo (2026-09-15, a pedido
+// del usuario — reemplaza la pestaña separada "⚙️ Objetivos Dormidos" que
+// se había armado primero). Fila 1 = lista maestra de objetivos (columna A
+// vacía a propósito, ver leerObjetivosMaestro_ — el usuario corrió las 7
+// columnas para dejarla así); fila 2 en adelante = 1 fila por sucursal, con
+// TRUE/FALSE en la columna del objetivo correspondiente (TRUE = dormido).
+// Se lee/escribe con el MISMO formato plano [{Sucursal, Objetivo}, ...]
+// (solo las combinaciones dormidas) que ya usaba la pestaña separada, así
+// que el cliente (valorizacion-recylink.html) no necesitó ningún cambio.
 function writeObjetivosDormidos_(ss, data) {
-  var sheet = ss.getSheetByName('⚙️ Objetivos Dormidos');
-  if (!sheet) throw new Error('Hoja "⚙️ Objetivos Dormidos" no encontrada');
-  var headerRow = buscarFilaEncabezado_(sheet, 'Sucursal');
-  if (!headerRow) throw new Error('No se encontro la fila de encabezado ("Sucursal") en Objetivos Dormidos');
-  var startRow = headerRow + 1;
+  var sheet = ss.getSheetByName('Objetivos 2026');
+  if (!sheet) throw new Error('Hoja "Objetivos 2026" no encontrada');
+  var lastCol = sheet.getLastColumn();
+  var headerRow = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  var colPorObjetivo = {}; // texto objetivo -> columna (1-based)
+  headerRow.forEach(function (txt, i) {
+    var t = String(txt || '').trim();
+    if (t) colPorObjetivo[t] = i + 1;
+  });
+
   var lastRow = sheet.getLastRow();
-  if (lastRow >= startRow) {
-    sheet.getRange(startRow, 1, lastRow - startRow + 1, 2).clearContent();
+  var filaPorSucursal = {}; // Sucursal -> fila (1-based)
+  if (lastRow >= 2) {
+    var sucRows = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+    sucRows.forEach(function (r, i) {
+      var suc = String(r[0] || '').trim();
+      if (suc) filaPorSucursal[suc] = 2 + i;
+    });
   }
-  var filas = data.filas || []; // [[Sucursal, Objetivo], ...]
-  if (filas.length > 0) {
-    sheet.getRange(startRow, 1, filas.length, 2).setValues(filas);
-  }
+
+  var dormidoSet = {}; // "Sucursal||Objetivo" -> true
+  (data.filas || []).forEach(function (f) { dormidoSet[f[0] + '||' + f[1]] = true; });
+
+  var todasSucursales = {};
+  Object.keys(filaPorSucursal).forEach(function (s) { todasSucursales[s] = true; });
+  (data.filas || []).forEach(function (f) { todasSucursales[f[0]] = true; });
+
+  Object.keys(todasSucursales).forEach(function (suc) {
+    var row = filaPorSucursal[suc];
+    if (!row) {
+      row = sheet.getLastRow() + 1;
+      sheet.getRange(row, 1).setValue(suc);
+      filaPorSucursal[suc] = row;
+    }
+    Object.keys(colPorObjetivo).forEach(function (objTexto) {
+      var col = colPorObjetivo[objTexto];
+      sheet.getRange(row, col).setValue(!!dormidoSet[suc + '||' + objTexto]);
+    });
+  });
 }
 function readObjetivosDormidosSheet_() {
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('⚙️ Objetivos Dormidos');
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Objetivos 2026');
   if (!sheet) return [];
-  var headerRow = buscarFilaEncabezado_(sheet, 'Sucursal');
-  if (!headerRow) return [];
-  var startRow = headerRow + 1;
+  var lastCol = sheet.getLastColumn();
   var lastRow = sheet.getLastRow();
-  if (lastRow < startRow) return [];
-  var data = sheet.getRange(startRow, 1, lastRow - startRow + 1, 2).getValues();
-  return data.filter(function (r) { return String(r[0] || '').trim() !== ''; }).map(function (r) {
-    return { Sucursal: String(r[0] || '').trim(), Objetivo: String(r[1] || '').trim() };
+  if (lastRow < 2 || lastCol < 2) return [];
+  var headerRow = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  var objetivoPorCol = {}; // indice 0-based -> texto objetivo
+  headerRow.forEach(function (txt, i) {
+    var t = String(txt || '').trim();
+    if (t) objetivoPorCol[i] = t;
   });
+  var data = sheet.getRange(2, 1, lastRow - 1, lastCol).getValues();
+  var result = [];
+  data.forEach(function (row) {
+    var suc = String(row[0] || '').trim();
+    if (!suc) return;
+    row.forEach(function (val, i) {
+      if (i === 0) return; // columna A = nombre de la sucursal, no un objetivo
+      var objTexto = objetivoPorCol[i];
+      if (!objTexto) return;
+      var esDormido = val === true || String(val).trim().toUpperCase() === 'TRUE';
+      if (esDormido) result.push({ Sucursal: suc, Objetivo: objTexto });
+    });
+  });
+  return result;
 }
 
 
