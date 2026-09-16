@@ -94,6 +94,7 @@ function doPost(e) {
     else if (tipo === 'minutas') writeMinutas_(ss, data); // NUEVO — Visor de Minutas
     else if (tipo === 'sucursalesCerradas') writeSucursalesCerradas_(ss, data);
     else if (tipo === 'objetivosDormidos') writeObjetivosDormidos_(ss, data);
+    else if (tipo === 'fgrDatosObra') writeFgrDatosObra_(ss, data);
 
     return ContentService
       .createTextOutput(JSON.stringify({ok: true}))
@@ -306,6 +307,46 @@ function readSucursalesCerradasSheet_() {
   if (lastRow < startRow) return [];
   var data = sheet.getRange(startRow, 1, lastRow - startRow + 1, 1).getValues();
   return data.map(function (r) { return String(r[0] || '').trim(); }).filter(function (s) { return s !== ''; });
+}
+
+// "⚙️ FGR Datos Obra" (2026-09-16, a pedido del usuario): m2 construidos y
+// tipo de obra (Vivienda en extensión / Edificio) para el cálculo de FGR en
+// socovesa-trazabilidad — antes se guardaba m2 en localStorage del navegador
+// (mismo riesgo de pérdida ya visto con "objetivos dormidos"/"obras
+// cerradas"), y el tipo de obra no existía. Formato: 3 columnas "Sucursal" |
+// "M2 Construidos" | "Tipo Obra", 1 fila por obra — se reemplaza la lista
+// completa cada vez, mismo criterio que Sucursales Cerradas.
+function writeFgrDatosObra_(ss, data) {
+  var sheet = ss.getSheetByName('⚙️ FGR Datos Obra');
+  if (!sheet) throw new Error('Hoja "⚙️ FGR Datos Obra" no encontrada');
+  var headerRow = buscarFilaEncabezado_(sheet, 'Sucursal');
+  if (!headerRow) throw new Error('No se encontro la fila de encabezado ("Sucursal") en FGR Datos Obra');
+  var startRow = headerRow + 1;
+  var lastRow = sheet.getLastRow();
+  if (lastRow >= startRow) {
+    sheet.getRange(startRow, 1, lastRow - startRow + 1, 3).clearContent();
+  }
+  var filas = data.filas || []; // [[Sucursal, M2, TipoObra], ...]
+  if (filas.length > 0) {
+    sheet.getRange(startRow, 1, filas.length, 3).setValues(filas);
+  }
+}
+function readFgrDatosObraSheet_() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('⚙️ FGR Datos Obra');
+  if (!sheet) return [];
+  var headerRow = buscarFilaEncabezado_(sheet, 'Sucursal');
+  if (!headerRow) return [];
+  var startRow = headerRow + 1;
+  var lastRow = sheet.getLastRow();
+  if (lastRow < startRow) return [];
+  var data = sheet.getRange(startRow, 1, lastRow - startRow + 1, 3).getValues();
+  return data.filter(function (r) { return String(r[0] || '').trim() !== ''; }).map(function (r) {
+    return {
+      Sucursal: String(r[0] || '').trim(),
+      M2: r[1] === '' || r[1] === null ? null : Number(r[1]),
+      TipoObra: String(r[2] || '').trim()
+    };
+  });
 }
 
 // "Objetivos 2026" como matriz Sucursal × Objetivo (2026-09-15, a pedido
@@ -593,13 +634,24 @@ function buildPayload_(anioParam) {
   // mostrar TODAS las obras sin importar el año seleccionado, aunque el
   // sidebar (EMPRESAS) SI este filtrado por año — se arma por separado a
   // partir de traza.todasLasSucursales (sin filtro de año).
+  // 2026-09-16: a diferencia del sidebar, el análisis de FGR SÍ debe incluir
+  // las obras cerradas (se marcan con "cerrada:true" para que el visor las
+  // distinga, pero no se excluyen de la tabla/promedios). También se suman
+  // m2 construidos y tipo de obra, guardados en "⚙️ FGR Datos Obra".
+  var fgrDatosObraPorSucursal = {};
+  readFgrDatosObraSheet_().forEach(function (r) { fgrDatosObraPorSucursal[r.Sucursal] = r; });
   var todasLasObrasFgr = Object.keys(traza.todasLasSucursales).sort().map(function (empId) {
+    var sucursal = traza.todasLasSucursales[empId];
+    var datosObra = fgrDatosObraPorSucursal[sucursal];
     return {
       id: empId,
-      sucursal: traza.todasLasSucursales[empId],
-      fgr: construirFgrInfo_(empId, totalResiduosPorEmpresa)
+      sucursal: sucursal,
+      fgr: construirFgrInfo_(empId, totalResiduosPorEmpresa),
+      cerrada: sucursalesCerradas.indexOf(sucursal) !== -1,
+      m2: datosObra ? datosObra.M2 : null,
+      tipoObra: datosObra ? datosObra.TipoObra : ''
     };
-  }).filter(function (o) { return sucursalesCerradas.indexOf(o.sucursal) === -1; });
+  });
 
   return {
     generatedAt: new Date().toISOString(),
