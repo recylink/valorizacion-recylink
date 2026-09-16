@@ -2165,12 +2165,30 @@ function getPct(suc,mes){
 // residuo tal cual venía de "Total Residuos", incluida la tierra de
 // excavación removida al iniciar el proyecto, lo que diluía el % para
 // obras con harta excavación sin valorizar.
+// FIX 2 (2026-09-16, caso real: Copec "Planta Maipú" mostraba 27% cuando
+// debía ser 65,9%): esta función es la que usa getAcumReal_(), que desde
+// el fix de prioridad de getAcum() (invertir_prioridad, 2026-09-15) se
+// evalúa SIEMPRE primero, incluso para empresas que ya tenían snapshots
+// sincronizados correctamente. Pero a diferencia de processData() (que
+// arma valMatrix respetando "excluirDeVal" — Respel excluido solo para
+// Copec, Escombro/Arena excluidos solo para Acciona, ver línea ~1680),
+// esta función NO replicaba esas exclusiones — solo excavación. Entonces
+// para Copec, cualquier mes con datos en "Total Residuos" pasó a incluir
+// Respel en el % en vivo (aunque el snapshot sincronizado sí lo excluía
+// correctamente), bajando el % real. Ahora se aplican las MISMAS 3
+// exclusiones que processData(), usando la columna "Respel no respel" de
+// "Total Residuos" (mismo criterio con el que se sincronizó esa hoja).
 function kgRealPorMesSuc_(suc) {
   var esM3 = empresaActual === 'euro' || empresaActual === 'acciona' || empresaActual === 'socovesa'; // mismo criterio que metricaVal en processData()
+  var esCopec = empresaActual === 'copec';
+  var esAcciona = empresaActual === 'acciona';
   var porMes = {};
   totalResiduosDesdeSheets.forEach(function(r){
     if (((r['Sucursal']||'')+'') !== suc) return;
-    if (normResiduo(r['Residuo']) === 'excavacion') return;
+    var residuoNorm = normResiduo(r['Residuo']);
+    if (residuoNorm === 'excavacion') return;
+    if (esCopec && ((r['Respel no respel']||'')+'') === 'Respel') return;
+    if (esAcciona && (residuoNorm === 'escombro' || residuoNorm === 'arena')) return;
     var anio = (r['Año']||'')+'';
     var mesLabel = (r['Mes']||'')+'';
     var idxMes = null;
@@ -2195,7 +2213,10 @@ function kgRealPorMesSuc_(suc) {
   Object.keys(mesesEnSesion).forEach(function(mesKey){ porMes[mesKey] = {total:0, val:0, co2:0}; });
   totalResiduosRows.forEach(function(r){
     if (r.suc !== suc) return;
-    if (normResiduo(r.residuo) === 'excavacion') return;
+    var residuoNorm = normResiduo(r.residuo);
+    if (residuoNorm === 'excavacion') return;
+    if (esCopec && r.respel) return;
+    if (esAcciona && (residuoNorm === 'escombro' || residuoNorm === 'arena')) return;
     if (!porMes[r.mes]) porMes[r.mes] = {total:0, val:0, co2:0};
     var cant = esM3 ? r.m3 : r.kg;
     porMes[r.mes].total += cant;
