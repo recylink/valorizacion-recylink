@@ -187,6 +187,36 @@ function readRespelSheet_() {
   });
 }
 
+// Lee "Total Residuos" (Sucursal | Mes | Residuo | Valorizado/No Valorizado |
+// Respel no respel | Total KG | Total M3 | Tons. CO2eq. evitadas) como array
+// de objetos, mismo formato que readRespelSheet_().
+// FIX (2026-09-16, caso real: Copec "Planta Maipú" seguía en 27% después de
+// sincronizar): writeTotalResiduos() sí guardaba los datos en el Sheet, pero
+// nunca se devolvían de vuelta al cliente en doGetClasico_ — faltaba esta
+// función y su entrada en "result". Sin esto, "Cargar desde Sheets" dejaba
+// totalResiduosDesdeSheets siempre vacío en el cliente, así que el cálculo
+// en vivo de % valorización (getAcumReal_, que excluye Respel para Copec)
+// nunca encontraba datos y caía de vuelta al snapshot viejo ya sincronizado
+// — solo funcionaba subiendo un Excel fresco en la misma sesión (que sí
+// llena totalResiduosRows en memoria).
+function readTotalResiduosSheet_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Total Residuos');
+  if (!sheet) return [];
+  var headerRow = buscarFilaEncabezado_(sheet, 'Sucursal');
+  if (!headerRow) return [];
+  var startRow = headerRow + 1;
+  var lastRow = sheet.getLastRow();
+  if (lastRow < startRow) return [];
+  var headers = sheet.getRange(headerRow, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var data = sheet.getRange(startRow, 1, lastRow - startRow + 1, sheet.getLastColumn()).getValues();
+  return data.filter(function (r) { return String(r[0] || '').trim() !== ''; }).map(function (r) {
+    var obj = {};
+    headers.forEach(function (h, i) { if (h) obj[h] = r[i]; });
+    return obj;
+  });
+}
+
 
 // ============================================================
 // 2) DOGET FUSIONADO — despacha según el parámetro de la URL
@@ -220,7 +250,8 @@ function doGetClasico_(e) {
     valorizacion: readSheet('♻️ Valorización') || readSheet('Valorización'),
     trazabilidad: readSheet('📊 Trazabilidad_Docs') || readSheet('Trazabilidad_Docs'),
     objetivos: readSheet('🎯 Objetivos') || readSheet('Objetivos'),
-    respel: readRespelSheet_()
+    respel: readRespelSheet_(),
+    totalResiduos: readTotalResiduosSheet_()
   };
 
   return ContentService

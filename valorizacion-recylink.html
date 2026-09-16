@@ -2178,6 +2178,16 @@ function getPct(suc,mes){
 // correctamente), bajando el % real. Ahora se aplican las MISMAS 3
 // exclusiones que processData(), usando la columna "Respel no respel" de
 // "Total Residuos" (mismo criterio con el que se sincronizó esa hoja).
+// FIX 3 (mismo caso, misma fecha): incluso con las exclusiones de arriba,
+// "Cargar desde Sheets" seguía sin recalcular nada para Copec porque su hoja
+// "Total Residuos" NO tiene columna "Año" (generaAnioTR solo incluye
+// Euro/Socovesa/Gespania/Salfa/Vital/Londres — ver autoSync()), así que
+// "!anio" descartaba TODAS sus filas silenciosamente y getAcumReal_ nunca
+// encontraba datos, cayendo siempre al snapshot viejo. Mismo problema para
+// Abastible/Ando/PMS/CCU/Acciona (tampoco tienen Año ahí). Se usa el mismo
+// fallback ya establecido para estos casos (año actual) que ya usa esta
+// misma pantalla al cargar "% Real" desde Sheets (ver arriba, ~línea 3400) y
+// Code-Socovesa.gs (leerTrazabilidad_).
 function kgRealPorMesSuc_(suc) {
   var esM3 = empresaActual === 'euro' || empresaActual === 'acciona' || empresaActual === 'socovesa'; // mismo criterio que metricaVal en processData()
   var esCopec = empresaActual === 'copec';
@@ -2190,10 +2200,11 @@ function kgRealPorMesSuc_(suc) {
     if (esCopec && ((r['Respel no respel']||'')+'') === 'Respel') return;
     if (esAcciona && (residuoNorm === 'escombro' || residuoNorm === 'arena')) return;
     var anio = (r['Año']||'')+'';
+    if (!anio) anio = String(new Date().getFullYear());
     var mesLabel = (r['Mes']||'')+'';
     var idxMes = null;
     Object.keys(MESES_ES).forEach(function(k){ if (MESES_ES[k] === mesLabel) idxMes = k; });
-    if (!anio || idxMes === null) return;
+    if (idxMes === null) return;
     var mesKey = anio + '-' + String(idxMes).padStart(2,'0');
     var cant = parseFloat(esM3 ? r['Total M3'] : r['Total KG']) || 0;
     // Tons. CO2eq. evitadas: se acumula acá también (además de total/val)
