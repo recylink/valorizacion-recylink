@@ -3,32 +3,45 @@
  * RECYLINK · Apps Script del Sheet — VERSIÓN FUSIONADA
  * ============================================================
  * Este archivo reemplaza por completo tu Code.gs actual.
- * Contiene DOS cosas que antes vivían en proyectos separados
- * y que ahora conviven en el mismo Web App (solo puede haber
- * un doGet y un doPost por proyecto):
  *
- *  1) LO QUE YA TENÍAS (sin tocar la lógica):
+ *  1) EL OTRO DESARROLLO (sin tocar la lógica):
  *     - doPost: escribe valorización / metas / trazabilidad / objetivos / total residuos
  *     - doGet "clásico": devuelve el volcado plano de las hojas
- *       (se usa para tu otro desarrollo, el que NO es este visor, y para
- *       el visor HTML de valorización/trazabilidad valorizacion-recylink.html)
+ *       (usado por valorizacion-recylink.html y cualquier otro consumidor existente)
  *
- *  2) LO NUEVO (para el visor HTML de trazabilidad):
+ *  2) EL VISOR DE TRAZABILIDAD:
  *     - Se activa SOLO si la request trae ?callback=... o ?visor=1
  *     - Si no viene ninguno de esos dos parámetros, doGet responde
- *       EXACTAMENTE igual que antes → tu otro desarrollo no se entera
- *       de este cambio.
+ *       EXACTAMENTE igual que antes → el otro desarrollo no se entera de nada.
+ *     - Incluye el % Acumulado real (fila "% Acumulado" en Valorización).
+ *
+ *  3) EL VISOR DE MINUTAS (integrado al visor de objetivos):
+ *     - Se activa SOLO si la request trae ?minutas=1
+ *     - Devuelve las filas crudas de la pestaña "Minuta" vía JSONP,
+ *       usando el mismo Apps Script (no depende de que el Sheet esté
+ *       compartido públicamente).
  * ============================================================
  */
 
 
 // ============================================================
-// 1) TU DOPOST ORIGINAL — SIN CAMBIOS + soporte para Total Residuos
+// 1) DOPOST — OTRO DESARROLLO, SIN CAMBIOS
 // ============================================================
 
 function doPost(e) {
   try {
-    const data = JSON.parse(e.postData.contents);
+    // Soporta tanto el POST directo (fetch, JSON en el body) como el método
+    // de respaldo del Visor de Minutas (formulario oculto, que llega como
+    // e.parameter.payload). Si no viene ninguno de los dos, se comporta
+    // exactamente como antes.
+    var raw;
+    if (e.parameter && e.parameter.payload) {
+      raw = e.parameter.payload;
+    } else {
+      raw = e.postData.contents;
+    }
+
+    const data = JSON.parse(raw);
     const ss = SpreadsheetApp.getActiveSpreadsheet();
     const tipo = data.tipo;
 
@@ -37,6 +50,7 @@ function doPost(e) {
     else if (tipo === 'trazabilidad') writeTrazabilidad(ss, data);
     else if (tipo === 'objetivos') writeObjetivos(ss, data);
     else if (tipo === 'totalResiduos') writeTotalResiduos(ss, data);
+    else if (tipo === 'minutas') writeMinutas_(ss, data); // NUEVO — Visor de Minutas
 
     return ContentService
       .createTextOutput(JSON.stringify({ok: true}))
@@ -54,14 +68,10 @@ function writeValorizacion(ss, data) {
   const startRow = 6;
   const lastRow = sheet.getLastRow();
   if (lastRow >= startRow) {
-    // Borrar por empresa_id+Tipo (no solo empresa_id): si el cliente no manda
-    // la fila "Meta %" (porque todavía no conoce el valor real), esta no debe
-    // borrarse — antes se borraban las 3 filas (% Real/% Acumulado/Meta %) por
-    // cualquier coincidencia de empresa_id, perdiendo la meta ya guardada.
-    const cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 3).getValues();
-    const keys = new Set(data.filas.map(f => f[0] + '|' + f[2]));
+    const col = sheet.getRange(startRow, 1, lastRow - startRow + 1, 1).getValues();
+    const ids = new Set(data.filas.map(f => f[0]));
     const toDelete = [];
-    cols.forEach((r, i) => { if (keys.has(r[0] + '|' + r[2])) toDelete.push(startRow + i); });
+    col.forEach((r, i) => { if (ids.has(r[0])) toDelete.push(startRow + i); });
     toDelete.reverse().forEach(r => sheet.deleteRow(r));
   }
   const insertRow = sheet.getLastRow() + 1;
@@ -130,13 +140,8 @@ function writeObjetivos(ss, data) {
   });
 }
 
-// ── NUEVO: Total Residuos + RESPEL (solo Copec) ──
+// ── Total Residuos + RESPEL (otro desarrollo) ──
 
-// Busca en la columna A la fila cuyo valor sea exactamente "valorEsperado"
-// (ej. "Sucursal" o "Residuo") y devuelve el número de fila (1-indexed).
-// Evita asumir que el header está en una fila fija, ya que estas 2 hojas
-// no tienen las filas decorativas de título/instrucciones que sí tienen
-// las 3 hojas principales.
 function buscarFilaEncabezado_(sheet, valorEsperado) {
   var lastRow = Math.min(sheet.getLastRow(), 20);
   if (lastRow < 1) return null;
@@ -147,10 +152,11 @@ function buscarFilaEncabezado_(sheet, valorEsperado) {
   return null;
 }
 
-// Reemplaza TODAS las filas de datos de "Total Residuos" por las que manda
-// el cliente. El cliente siempre envía el set completo vigente (calculado
-// desde el Excel cargado), así que no hace falta borrado selectivo por
-// empresa_id como en writeValorizacion (esta hoja no tiene esa columna).
+// FIX (2026-09-16): numCols pasó de 7 a 8 — el cliente (valorizacion-recylink.html,
+// generaCO2TR) manda "Tons. CO2eq. evitadas" como 8va columna para Copec (el write
+// de abajo ya escribía las 8 con el largo real de la fila), pero el borrado previo
+// seguía limitado a 7 — si un resync traía menos filas que antes, la columna de
+// CO2 de las filas sobrantes quedaba con el valor viejo sin limpiar.
 function writeTotalResiduos(ss, data) {
   var sheet = ss.getSheetByName('Total Residuos');
   if (!sheet) throw new Error('Hoja "Total Residuos" no encontrada');
@@ -167,8 +173,6 @@ function writeTotalResiduos(ss, data) {
   }
 }
 
-// Lee la hoja RESPEL (Residuo -> TRUE/FALSE) como array de objetos,
-// igual formato que usa doGetClasico_ para las otras 3 hojas.
 function readRespelSheet_() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = ss.getSheetByName('RESPEL');
@@ -219,17 +223,119 @@ function readTotalResiduosSheet_() {
 
 
 // ============================================================
+// VISOR DE MINUTAS: escritura en la hoja "Minuta "
+// ============================================================
+
+var SHEET_MINUTA_CANDIDATOS = ['Minuta ', 'Minuta', '📝 Minuta'];
+
+function encontrarHojaMinuta_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  for (var i = 0; i < SHEET_MINUTA_CANDIDATOS.length; i++) {
+    var sheet = ss.getSheetByName(SHEET_MINUTA_CANDIDATOS[i]);
+    if (sheet) return sheet;
+  }
+  throw new Error('No se encontró la hoja de Minutas: ' + SHEET_MINUTA_CANDIDATOS.join(' / '));
+}
+
+/**
+ * data.sessions viene del visor con esta forma:
+ * [{ headerRow, title, items: [{item, cumplido, comentario, acuerdos, revisado}, ...] }, ...]
+ *
+ * Para cada sesión:
+ *  1) Si trae headerRow (fila real 1-indexed del título), la usa directo.
+ *     Si no, intenta ubicarla por texto exacto del título (compatibilidad
+ *     con minutas antiguas sin headerRow) — y si tampoco la encuentra así,
+ *     es una minuta NUEVA creada desde el visor: se agrega al final de la hoja.
+ *  2) Escribe/actualiza el título en la columna A de esa fila (por si cambió
+ *     la etiqueta de tipo de reunión: "· Oficina Central" / "· Sucursal: X").
+ *  3) Si la fila siguiente es un sub-encabezado ("Items", "Item" o "Tema"), la salta.
+ *  4) Escribe cada ítem en su fila correspondiente (A=Item, B=Cumplimiento,
+ *     C=Comentario, D=Acuerdos, E=Revisado), agregando filas si hacen falta.
+ */
+
+function writeMinutas_(ss, data) {
+  var sheet = encontrarHojaMinuta_();
+  var searchFrom = 1;
+
+  (data.sessions || []).forEach(function (session) {
+    var headerRow = session.headerRow || -1;
+
+    if (headerRow === -1) {
+      headerRow = buscarSesionMinuta_(sheet, session.title, searchFrom);
+    }
+
+    if (headerRow === -1) {
+      // Minuta nueva (creada desde el visor): se agrega al final de la hoja.
+      headerRow = sheet.getLastRow() + 1;
+    }
+
+    sheet.getRange(headerRow, 1).setValue(session.title || '');
+
+    var dataStartRow = headerRow + 1;
+    var maybeSub = String(sheet.getRange(dataStartRow, 1).getValue()).trim().toLowerCase();
+    if (maybeSub === 'items' || maybeSub === 'item' || maybeSub === 'tema') dataStartRow++;
+
+    var blockEnd = buscarFinBloqueMinuta_(sheet, dataStartRow);
+    var currentSize = blockEnd - dataStartRow;
+    var rows = session.items || [];
+    var neededSize = rows.length;
+
+    if (neededSize > currentSize) {
+      sheet.insertRowsBefore(blockEnd, neededSize - currentSize);
+    }
+
+    for (var i = 0; i < neededSize; i++) {
+      var row = rows[i];
+      var targetRow = dataStartRow + i;
+      sheet.getRange(targetRow, 1).setValue(row.item || '');
+      sheet.getRange(targetRow, 2).setValue(!!row.cumplido);
+      sheet.getRange(targetRow, 3).setValue(row.comentario || '');
+      sheet.getRange(targetRow, 4).setValue(row.acuerdos || '');
+      sheet.getRange(targetRow, 5).setValue(!!row.revisado);
+    }
+
+    searchFrom = headerRow + 1;
+  });
+}
+
+// Busca una fila cuya columna A coincida EXACTO (trim, sin distinguir mayúsculas)
+// con el título de la sesión, empezando desde fromRow.
+function buscarSesionMinuta_(sheet, title, fromRow) {
+  var lastRow = sheet.getLastRow();
+  var target = (title || '').trim().toLowerCase();
+  for (var r = fromRow; r <= lastRow; r++) {
+    var val = String(sheet.getRange(r, 1).getValue()).trim().toLowerCase();
+    if (val === target) return r;
+  }
+  return -1;
+}
+
+// El bloque de una minuta termina cuando aparece otra fila que empieza con
+// "minuta" (nueva sesión) o al llegar al final de la hoja.
+function buscarFinBloqueMinuta_(sheet, fromRow) {
+  var lastRow = sheet.getLastRow();
+  for (var r = fromRow; r <= lastRow; r++) {
+    var val = String(sheet.getRange(r, 1).getValue()).trim().toLowerCase();
+    if (val.indexOf('minuta') === 0) return r;
+  }
+  return lastRow + 1;
+}
+
+
+// ============================================================
 // 2) DOGET FUSIONADO — despacha según el parámetro de la URL
 // ============================================================
 
 function doGet(e) {
+  const quiereMinutas = e && e.parameter && e.parameter.minutas === '1';
+  if (quiereMinutas) return doGetMinutas_(e);
+
   const quiereVisor = e && e.parameter && (e.parameter.callback || e.parameter.visor === '1');
   if (quiereVisor) return doGetVisor_(e);
   return doGetClasico_(e);
 }
 
-
-// ── 2a) TU DOGET ORIGINAL, RENOMBRADO (comportamiento intacto) + respel ──
+// ── OTRO DESARROLLO, RENOMBRADO (comportamiento intacto) + respel + total residuos ──
 function doGetClasico_(e) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const startRow = 6;
@@ -251,6 +357,9 @@ function doGetClasico_(e) {
     trazabilidad: readSheet('📊 Trazabilidad_Docs') || readSheet('Trazabilidad_Docs'),
     objetivos: readSheet('🎯 Objetivos') || readSheet('Objetivos'),
     respel: readRespelSheet_(),
+    // FIX (2026-09-16): faltaba devolver "Total Residuos" — ver readTotalResiduosSheet_
+    // más arriba para el detalle del bug que esto causaba (% valorización en vivo de
+    // Copec, que excluye Respel, nunca encontraba datos al "Cargar desde Sheets").
     totalResiduos: readTotalResiduosSheet_()
   };
 
@@ -260,14 +369,38 @@ function doGetClasico_(e) {
 }
 
 
-// ── 2b) VISOR DE TRAZABILIDAD — lo nuevo ──
+// ── NUEVO — VISOR DE MINUTAS: lectura vía JSONP ──
+// Devuelve las filas crudas (A:E) de la pestaña "Minuta" tal cual están en
+// el Sheet, para que el visor las parsee con su propia lógica de sesiones.
+function doGetMinutas_(e) {
+  var payload;
+  try {
+    var sheet = encontrarHojaMinuta_();
+    var lastRow = sheet.getLastRow();
+    var lastCol = Math.max(sheet.getLastColumn(), 5);
+    var rows = lastRow > 0 ? sheet.getRange(1, 1, lastRow, lastCol).getValues() : [];
+    payload = { rows: rows };
+  } catch (err) {
+    payload = { error: true, message: String(err) };
+  }
+
+  var callback = e && e.parameter && e.parameter.callback;
+  if (callback) {
+    var js = callback + "(" + JSON.stringify(payload) + ");";
+    return ContentService.createTextOutput(js)
+      .setMimeType(ContentService.MimeType.JAVASCRIPT);
+  }
+  return ContentService.createTextOutput(JSON.stringify(payload))
+    .setMimeType(ContentService.MimeType.JSON);
+}
+
+
+// ── VISOR DE TRAZABILIDAD ──
 
 var EMPRESA_NOMBRE  = "COPEC";
 var EMPRESA_COLOR   = "#175CD3";
 var EMPRESA_COLOR_L = "#EFF8FF";
 
-// Cada hoja se busca probando primero el nombre CON emoji (como aparece
-// en tus pestañas reales) y si no existe, el nombre sin emoji.
 var SHEET_TRAZA_CANDIDATOS = ['📊 Trazabilidad_Docs', 'Trazabilidad_Docs'];
 var SHEET_VAL_CANDIDATOS   = ['♻️ Valorización', 'Valorización'];
 var SHEET_CSE_CANDIDATOS   = ['👥 Seguimiento_CSE', 'Seguimiento_CSE'];
@@ -275,8 +408,6 @@ var SHEET_CSE_CANDIDATOS   = ['👥 Seguimiento_CSE', 'Seguimiento_CSE'];
 var MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio",
              "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 
-// (el HTML original traía también "Ingreso/Costo", pero esa columna
-//  no existe en el Sheet real, así que se excluye)
 var DOC_COLS = ["Cert. tratamiento","Factura","Cert. declaración","Transportista","Disposición final"];
 
 
@@ -335,7 +466,6 @@ function encontrarHoja_(candidatos) {
   throw new Error("No se encontró ninguna hoja llamada: " + candidatos.join(" / "));
 }
 
-/** Ubica la fila de encabezado (busca "empresa_id" en la columna A). */
 function getSheetRows_(candidatos) {
   var sheet = encontrarHoja_(candidatos);
   var data = sheet.getDataRange().getValues();
@@ -356,21 +486,20 @@ function getSheetRows_(candidatos) {
 function leerTrazabilidad_() {
   var sr = getSheetRows_(SHEET_TRAZA_CANDIDATOS);
   var h = sr.header;
-  var idxEmp = h.indexOf("empresa_id");
   var idxSuc = h.indexOf("Sucursal");
   var idxMes = h.indexOf("Mes");
   var idxRes = h.indexOf("Residuo");
   var idxImp = h.indexOf("Importaciones");
-  var docIdx = DOC_COLS.map(function (c) { return h.indexOf(c); });
+  var docIdx = DOC_COLS.map(function (c) { return h.lastIndexOf(c); });
 
   var sucursales = {};
   var porEmpresaMes = {};
 
   sr.rows.forEach(function (r) {
-    var empId = String(r[idxEmp] || "").trim();
-    if (!empId) return;
     var suc = String(r[idxSuc] || "").trim();
-    var mes = String(r[idxMes] || "").trim();
+    if (!suc) return;
+    var empId = normalizarSucursal_(suc);
+    var mes = normalizarMes_(r[idxMes]);
     var residuo = String(r[idxRes] || "").trim();
     if (!mes || !residuo) return;
 
@@ -397,25 +526,27 @@ function leerTrazabilidad_() {
 function leerValorizacion_() {
   var sr = getSheetRows_(SHEET_VAL_CANDIDATOS);
   var h = sr.header;
-  var idxEmp = h.indexOf("empresa_id");
+  var idxSuc = h.indexOf("Sucursal");
   var idxTipo = h.indexOf("Tipo");
   var mesIdx = MESES.map(function (m) { return h.indexOf(m); });
 
   var valData = {};
 
   sr.rows.forEach(function (r) {
-    var empId = String(r[idxEmp] || "").trim();
-    if (!empId) return;
+    var suc = String(r[idxSuc] || "").trim();
+    if (!suc) return;
+    var empId = normalizarSucursal_(suc);
     var tipo = String(r[idxTipo] || "").trim().toLowerCase();
 
-    valData[empId] = valData[empId] || { meses: {}, meta: {} };
+    valData[empId] = valData[empId] || { meses: {}, meta: {}, acumulado: {} };
 
     MESES.forEach(function (m, i) {
       var col = mesIdx[i];
       if (col === -1) return;
       var val = normalizePercent_(r[col]);
       if (val === null) return;
-      if (tipo.indexOf("real") !== -1) valData[empId].meses[m] = val;
+      if (tipo.indexOf("acumulado") !== -1) valData[empId].acumulado[m] = val;
+      else if (tipo.indexOf("real") !== -1) valData[empId].meses[m] = val;
       else if (tipo.indexOf("meta") !== -1) valData[empId].meta[m] = val;
     });
   });
@@ -550,6 +681,24 @@ function calcularMesesActivos_(traza, val, cse) {
 
 // ── Helpers de normalización ──
 
+function normalizarMes_(raw) {
+  var m = String(raw || "").trim();
+  if (!m) return "";
+  for (var i = 0; i < MESES.length; i++) {
+    if (MESES[i].toLowerCase() === m.toLowerCase()) return MESES[i];
+  }
+  return m;
+}
+
+function normalizarSucursal_(s) {
+  return String(s || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
 function normalizeInt_(raw) {
   if (raw === "" || raw === null || raw === undefined) return null;
   var n = Number(raw);
@@ -592,4 +741,99 @@ function letraFromSucursal_(s) {
 function testBuildPayload() {
   var payload = buildPayload_();
   Logger.log(JSON.stringify(payload, null, 2));
+}
+
+// ── Utilidad para probar la lectura de Minutas desde el editor ──
+// (Ejecutar → testReadMinutas, luego revisa Ver → Registros de ejecución)
+function testReadMinutas() {
+  var sheet = encontrarHojaMinuta_();
+  var lastRow = sheet.getLastRow();
+  var lastCol = Math.max(sheet.getLastColumn(), 5);
+  var rows = lastRow > 0 ? sheet.getRange(1, 1, lastRow, lastCol).getValues() : [];
+  Logger.log(JSON.stringify(rows.slice(0, 15), null, 2));
+}
+
+// ── Utilidad para probar el guardado de Minutas desde el editor ──
+// (Ejecutar → testWriteMinutas, luego revisa Ver → Registros de ejecución)
+function testWriteMinutas() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var fakeData = {
+    sessions: [
+      {
+        title: "Minuta 23/06/2026",
+        items: [
+          { item: "Ítem de prueba (borrar después)", cumplido: true, comentario: "Comentario de prueba", acuerdos: "Acuerdo de prueba", revisado: true }
+        ]
+      }
+    ]
+  };
+  writeMinutas_(ss, fakeData);
+  Logger.log("Listo — revisa la hoja de Minutas.");
+}
+
+// data.filas viene del visor con esta forma:
+// [{ empresaId, sucursal, accion: "Correo seguimiento"|"Reunión seguimiento",
+//    valores: { Enero: true|false|null, Febrero: ..., ... } }, ...]
+//
+// Ubica la fila por (Sucursal, Acción CSE) usando los encabezados reales de
+// la hoja (no posiciones fijas), así no importa el orden de columnas. Si no
+// encuentra la fila, la crea al final. Solo escribe los meses presentes en
+// "valores" — no toca el resto de la fila.
+function writeCSE_(ss, data) {
+  var sheet = ss.getSheetByName('👥 Seguimiento_CSE') || ss.getSheetByName('Seguimiento_CSE');
+  if (!sheet) throw new Error('Hoja Seguimiento_CSE no encontrada');
+
+  var lastRow = sheet.getLastRow();
+  var lastCol = sheet.getLastColumn();
+  if (lastRow < 1) throw new Error('Hoja Seguimiento_CSE está vacía');
+
+  var colA = sheet.getRange(1, 1, lastRow, 1).getValues();
+  var headerRow = -1;
+  for (var i = 0; i < colA.length; i++) {
+    if (String(colA[i][0] || '').trim().toLowerCase() === 'empresa_id') { headerRow = i + 1; break; }
+  }
+  if (headerRow === -1) throw new Error('No se encontró la fila de encabezado ("empresa_id") en Seguimiento_CSE');
+
+  var headers = sheet.getRange(headerRow, 1, 1, lastCol).getValues()[0].map(function (h) { return String(h || '').trim(); });
+  var idxEmpresaId = headers.indexOf('empresa_id');
+  var idxSucursal = headers.indexOf('Sucursal');
+  var idxAccion = headers.indexOf('Acción CSE');
+  if (idxSucursal === -1 || idxAccion === -1) {
+    throw new Error('Faltan columnas "Sucursal" o "Acción CSE" en Seguimiento_CSE');
+  }
+  var mesIdx = {};
+  MESES.forEach(function (m) { mesIdx[m] = headers.indexOf(m); });
+
+  var startRow = headerRow + 1;
+  var numDataRows = Math.max(sheet.getLastRow() - startRow + 1, 0);
+  var body = numDataRows > 0 ? sheet.getRange(startRow, 1, numDataRows, lastCol).getValues() : [];
+
+  (data.filas || []).forEach(function (fila) {
+    var sucursalNorm = String(fila.sucursal || '').trim().toLowerCase();
+    var accionNorm = String(fila.accion || '').trim().toLowerCase();
+    var rowIdx = -1;
+    for (var i = 0; i < body.length; i++) {
+      var suc = String(body[i][idxSucursal] || '').trim().toLowerCase();
+      var acc = String(body[i][idxAccion] || '').trim().toLowerCase();
+      if (suc === sucursalNorm && acc === accionNorm) { rowIdx = i; break; }
+    }
+
+    var targetRow;
+    if (rowIdx !== -1) {
+      targetRow = startRow + rowIdx;
+    } else {
+      targetRow = sheet.getLastRow() + 1;
+      if (idxEmpresaId !== -1) sheet.getRange(targetRow, idxEmpresaId + 1).setValue(fila.empresaId || '');
+      sheet.getRange(targetRow, idxSucursal + 1).setValue(fila.sucursal || '');
+      sheet.getRange(targetRow, idxAccion + 1).setValue(fila.accion || '');
+    }
+
+    var valores = fila.valores || {};
+    MESES.forEach(function (m) {
+      var col = mesIdx[m];
+      if (col === -1 || !(m in valores)) return;
+      var v = valores[m];
+      sheet.getRange(targetRow, col + 1).setValue(v === true ? 'SI' : v === false ? 'NO' : '');
+    });
+  });
 }
