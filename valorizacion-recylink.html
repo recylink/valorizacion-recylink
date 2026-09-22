@@ -441,8 +441,8 @@ var EMPRESAS = {
     prefix: 'socovesa',
     trazCols: [
       {header:'Sucursal',key:'suc'},{header:'Mes',key:'mes'},{header:'Residuo',key:'residuo'},
-      {header:'Transportista (nombre)',key:'transpNombre'},{header:'Cod. LER',key:'ler'},
-      {header:'Imp.',key:'imp'},{header:'Cert. trat.',key:'cert'},{header:'Cert. decl.',key:'decl'},
+      {header:'Cod. LER',key:'ler'},{header:'Imp.',key:'imp'},{header:'Cert. trat.',key:'cert'},
+      {header:'Factura',key:'factura'},{header:'Cert. decl.',key:'decl'},
       {header:'Transportista',key:'transp'},{header:'Disp. final',key:'disp'}
     ],
     trazDocsCompletos: ['cert','transp','disp'],
@@ -1870,7 +1870,11 @@ function autoSync(rows) {
   // solo mes) — mismo lugar que Euro/Socovesa/Gespania: columna B, entre Sucursal y Mes.
   var filasTotalResiduos = [];
   if (empresaActual === 'copec' || empresaActual === 'abastible' || empresaActual === 'gespania' || empresaActual === 'salfa' || empresaActual === 'euro' || empresaActual === 'ando' || empresaActual === 'pms' || empresaActual === 'ccu' || empresaActual === 'acciona' || empresaActual === 'socovesa' || empresaActual === 'vital' || empresaActual === 'londres') {
-    var generaAnioTR = empresaActual === 'euro' || empresaActual === 'socovesa' || empresaActual === 'gespania' || empresaActual === 'salfa' || empresaActual === 'vital' || empresaActual === 'londres';
+    // Ando agregó la columna Año en "Total Residuos" el 2026-09-22 (a pedido
+    // del usuario: "total residuos no distingue año") — mismo header sin usar
+    // copiado de la plantilla, igual que ya pasó con Valorización/
+    // Trazabilidad_Docs/Objetivos de Ando.
+    var generaAnioTR = empresaActual === 'euro' || empresaActual === 'socovesa' || empresaActual === 'gespania' || empresaActual === 'salfa' || empresaActual === 'vital' || empresaActual === 'londres' || empresaActual === 'ando';
     var generaCO2TR = empresaActual === 'copec' || empresaActual === 'abastible' || empresaActual === 'gespania' || empresaActual === 'salfa' || empresaActual === 'euro' || empresaActual === 'socovesa' || empresaActual === 'vital' || empresaActual === 'londres';
     filasTotalResiduos = totalResiduosRows.map(function(r){
       var row = [r.suc];
@@ -1973,11 +1977,17 @@ function autoSync(rows) {
   // sucursal" queda fuera del array como con Vital/Londres, sin tocarse).
   var esSalfaTraz = empresaActual === 'salfa';
   var filasTraz = trazRows.map(function(r){
-    if (esEuroTraz || esGespaniaTraz || esVitalTraz || esAndoTraz || esLondresTraz || esSalfaTraz) {
+    // Socovesa se unificó a esta misma estructura (2026-09-22, a pedido del
+    // usuario) — antes tenía un orden propio sin "Factura" y con
+    // "Transportista" antes de "Código LER", lo que llevó a que su Sheet
+    // real tuviera una columna "Transportista" duplicada (creada a mano en
+    // algún momento, probablemente copiando el layout de otra empresa) y
+    // "Disposición final" cayera siempre en esa columna duplicada en vez de
+    // en la real. Ver migración manual de datos en la hoja (reordenar
+    // columnas existentes) — este cambio de código asume que la hoja ya
+    // quedó en el orden de abajo.
+    if (esEuroTraz || esGespaniaTraz || esVitalTraz || esAndoTraz || esLondresTraz || esSalfaTraz || esSocovesaTraz) {
       return [sucId(r.suc), r.suc, MESES_ES[parseInt(r.mes.slice(5))], r.mes.slice(0,4), r.residuo, r.ler, r.imp, r.cert, r.factura, r.decl, r.transp, r.disp];
-    }
-    if (esSocovesaTraz) {
-      return [sucId(r.suc), r.suc, MESES_ES[parseInt(r.mes.slice(5))], r.mes.slice(0,4), r.residuo, r.transp, r.ler, r.imp, r.cert, r.decl, r.disp];
     }
     var row = [sucId(r.suc)];
     emp.trazCols.forEach(function(col){

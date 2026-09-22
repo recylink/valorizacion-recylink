@@ -209,13 +209,18 @@ function buscarFilaEncabezado_(sheet, valorEsperado) {
 // el cliente. El cliente siempre envia el set completo vigente (calculado
 // desde el Excel cargado), asi que no hace falta borrado selectivo por
 // empresa_id como en writeValorizacion (esta hoja no tiene esa columna).
+// FIX (2026-09-22, a pedido del usuario: "total residuos no distingue
+// año"): la hoja ya tenía el header "Año" (columna B, copiado de la misma
+// plantilla que Valorización/Trazabilidad_Docs/Objetivos) sin usar — se
+// agregó 'ando' a generaAnioTR en el cliente, así que ahora manda
+// [Sucursal,Año,Mes,Residuo,...] (8 campos) en vez de 7.
 function writeTotalResiduos(ss, data) {
   var sheet = ss.getSheetByName('Total Residuos');
   if (!sheet) throw new Error('Hoja "Total Residuos" no encontrada');
   var headerRow = buscarFilaEncabezado_(sheet, 'Sucursal');
   if (!headerRow) throw new Error('No se encontro la fila de encabezado ("Sucursal") en Total Residuos');
   var startRow = headerRow + 1;
-  var numCols = 7; // Sucursal | Mes | Residuo | Valorizado/No Valorizado | Respel no respel | Total KG | Total M3
+  var numCols = 8; // Sucursal | Año | Mes | Residuo | Valorizado/No Valorizado | Respel no respel | Total KG | Total M3
   var lastRow = sheet.getLastRow();
   if (lastRow >= startRow) {
     sheet.getRange(startRow, 1, lastRow - startRow + 1, numCols).clearContent();
@@ -223,6 +228,31 @@ function writeTotalResiduos(ss, data) {
   if (data.filas && data.filas.length > 0) {
     sheet.getRange(startRow, 1, data.filas.length, data.filas[0].length).setValues(data.filas);
   }
+}
+
+// FIX (2026-09-22, mismo bug real ya encontrado en Copec — "Planta Maipú"
+// seguía con el % viejo tras sincronizar): writeTotalResiduos() sí guardaba
+// los datos, pero nunca se devolvían de vuelta al cliente en
+// doGetClasico_ — faltaba esta función y su entrada en "result". Sin esto,
+// "Cargar desde Sheets" dejaba totalResiduosDesdeSheets siempre vacío, así
+// que el cálculo en vivo de % valorización (getAcumReal_) nunca encontraba
+// datos y caía al snapshot ya sincronizado — solo funcionaba subiendo un
+// Excel fresco en la misma sesión.
+function readTotalResiduosSheet_() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Total Residuos');
+  if (!sheet) return [];
+  var headerRow = buscarFilaEncabezado_(sheet, 'Sucursal');
+  if (!headerRow) return [];
+  var startRow = headerRow + 1;
+  var lastRow = sheet.getLastRow();
+  if (lastRow < startRow) return [];
+  var headers = sheet.getRange(headerRow, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var data = sheet.getRange(startRow, 1, lastRow - startRow + 1, sheet.getLastColumn()).getValues();
+  return data.filter(function (r) { return String(r[0] || '').trim() !== ''; }).map(function (r) {
+    var obj = {};
+    headers.forEach(function (h, i) { if (h) obj[h] = r[i]; });
+    return obj;
+  });
 }
 
 // ── Costo e Ingreso por residuo ──
@@ -432,7 +462,8 @@ function doGetClasico_(e) {
     trazabilidad: readSheet('📊 Trazabilidad_Docs') || readSheet('Trazabilidad_Docs'),
     objetivos: readSheet('🎯 Objetivos') || readSheet('Objetivos'),
     respel: readRespelSheet_(),
-    cse: readCseSheetClasico_()
+    cse: readCseSheetClasico_(),
+    totalResiduos: readTotalResiduosSheet_()
   };
 
   return ContentService
