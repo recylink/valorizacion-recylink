@@ -3,18 +3,20 @@
  * RECYLINK · Apps Script del Sheet de ANDO — VERSIÓN FUSIONADA
  * ============================================================
  * FUSIÓN (2026-09-22, a pedido del usuario: "quiero un code que se
- * comunique con valorización y visor"): hasta ahora Ando tenía 2
- * proyectos de Apps Script separados apuntando al mismo Sheet:
- *   - Code-Ando.gs        → usado por valorizacion-recylink.html (visor principal)
- *   - Code-Ando-Visor.gs  → usado por el repo "Visor-de-Objetivos-ANDO"
- *     (GitHub Pages, standalone)
- * Esto ya causó una vez que un fix se aplicara solo a uno de los dos
- * (ver historial: el fix de Año en la clave de borrado se aplicó a
- * Code-Ando-Visor.gs el 2026-09-03, pero Code-Ando.gs se quedó atrás
- * hasta el 2026-09-22). Este archivo reemplaza a AMBOS — mismo patrón
- * "versión fusionada" que ya usan Code.gs (Copec)/Code-Euro.gs/
- * Code-Socovesa.gs: un solo doGet que despacha según el parámetro de
- * la URL, y un solo doPost con todos los tipos de sync.
+ * comunique con valorización y visor"): es UN SOLO Apps Script (un solo
+ * despliegue) el que atiende tanto a valorizacion-recylink.html (app
+ * principal) como al repo "Visor-de-Objetivos-ANDO" (GitHub Pages,
+ * standalone) — confirmado por el usuario. En el repo, sin embargo,
+ * había 2 archivos (Code-Ando.gs y Code-Ando-Visor.gs) que habían
+ * quedado como snapshots desincronizados de ese mismo script real,
+ * pegados en momentos distintos: Code-Ando-Visor.gs (2026-09-03) ya
+ * tenía el fix de Año en la clave de borrado; Code-Ando.gs (más viejo
+ * en el repo) no. Este archivo fusiona ambos snapshots en uno solo —
+ * mismo patrón "versión fusionada" que ya usan Code.gs (Copec)/
+ * Code-Euro.gs/Code-Socovesa.gs: un solo doGet que despacha según el
+ * parámetro de la URL, y un solo doPost con todos los tipos de sync.
+ * Se pega en el ÚNICO proyecto de Apps Script real (no hay 2
+ * despliegues que actualizar).
  *
  *  1) LA APP PRINCIPAL (valorizacion-recylink.html):
  *     - doPost: escribe valorización/metas/trazabilidad/objetivos/
