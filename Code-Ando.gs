@@ -15,8 +15,13 @@
  * Sucursal | Mes | Residuo | Valorizado/No Valorizado | Respel no respel
  * | Total KG | Total M3) y "RESPEL" (headers: Residuo | RESPEL) ya
  * creadas — Ando ya trae ambas listas para usar. A diferencia de Euro,
- * Ando NO usa las columnas Año ni Tons. CO2eq. evitadas (esas 2 quedan
- * exclusivas de Euro por decisión del usuario, 2026-07-27).
+ * Ando no usa "Tons. CO2eq. evitadas" (exclusiva de Euro, decisión del
+ * usuario 2026-07-27). Ando SÍ agregó la columna Año en Valorización/
+ * Trazabilidad_Docs/Objetivos más adelante (EMPRESAS_VAL_CON_ANIO/
+ * EMPRESAS_OBJ_CON_ANIO en el cliente incluyen 'ando') — ver el FIX
+ * 2026-09-22 en cada write* más abajo, que agrega el Año a la clave de
+ * borrado (este archivo se había quedado atrás respecto al mismo fix ya
+ * aplicado en Code-Ando-Visor.gs el 2026-09-03).
  *
  * Nota: la hoja Trazabilidad_Docs de Ando tiene una columna extra al
  * final ("Comentario por sucursal") que no está en trazCols del HTML —
@@ -48,22 +53,24 @@ function doPost(e) {
   }
 }
 
+// FIX (2026-09-22, a pedido del usuario: "en ando se puede cargar un mes sin
+// borrar nada?"): la clave de borrado no incluía el Año, aunque el cliente
+// SÍ lo manda para Ando desde que se agregó 'ando' a EMPRESAS_VAL_CON_ANIO
+// (fila real: [empresa_id,Sucursal,Tipo,Año,Enero..Diciembre]) — sincronizar
+// "% Real" de un año podía borrar de paso el mismo Tipo de OTRO año. Mismo
+// fix que ya tenía aplicado Code-Ando-Visor.gs (el proyecto del visor
+// standalone) desde 2026-09-03; a este archivo (el que realmente usa
+// valorizacion-recylink.html al subir un Excel) nunca se le había aplicado.
 function writeValorizacion(ss, data) {
   const sheet = ss.getSheetByName('♻️ Valorización') || ss.getSheetByName('Valorización');
   if (!sheet) throw new Error('Hoja Valorización no encontrada');
   const startRow = 6;
   const lastRow = sheet.getLastRow();
   if (lastRow >= startRow) {
-    // Borrar por empresa_id+Tipo (no solo empresa_id): si el cliente no manda
-    // la fila "Meta %" (porque todavía no conoce el valor real), esta no debe
-    // borrarse — antes se borraban las 3 filas (% Real/% Acumulado/Meta %) por
-    // cualquier coincidencia de empresa_id, perdiendo la meta ya guardada. Este
-    // es exactamente el bug que le borró la Meta % (5%) a Terminal Bus el
-    // 2026-07-27 al subir el Excel antes de que "Cargar desde Sheets" terminara.
-    const cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 3).getValues();
-    const keys = new Set(data.filas.map(f => f[0] + '|' + f[2]));
+    const cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 4).getValues();
+    const keys = new Set(data.filas.map(f => f[0] + '|' + f[2] + '|' + f[3]));
     const toDelete = [];
-    cols.forEach((r, i) => { if (keys.has(r[0] + '|' + r[2])) toDelete.push(startRow + i); });
+    cols.forEach((r, i) => { if (keys.has(r[0] + '|' + r[2] + '|' + r[3])) toDelete.push(startRow + i); });
     toDelete.reverse().forEach(r => sheet.deleteRow(r));
   }
   const insertRow = sheet.getLastRow() + 1;
@@ -72,6 +79,10 @@ function writeValorizacion(ss, data) {
   });
 }
 
+// FIX (2026-09-22, mismo caso que writeValorizacion arriba): sin el Año en
+// la comparación, la Meta % de un año sobreescribía la de OTRO año que ya
+// había matcheado por empresa_id+"Meta %". Mismo fix ya aplicado en
+// Code-Ando-Visor.gs.
 function writeMetas(ss, data) {
   const sheet = ss.getSheetByName('♻️ Valorización') || ss.getSheetByName('Valorización');
   if (!sheet) throw new Error('Hoja Valorización no encontrada');
@@ -81,9 +92,10 @@ function writeMetas(ss, data) {
   const rows = sheet.getRange(startRow, 1, lastRow - startRow + 1, sheet.getLastColumn()).getValues();
   data.filas.forEach(function(fila) {
     const id = fila[0];
+    const anio = fila[3];
     let found = false;
     rows.forEach(function(row, i) {
-      if (row[0] === id && row[2] === 'Meta %') {
+      if (row[0] === id && row[2] === 'Meta %' && String(row[3]) === String(anio)) {
         sheet.getRange(startRow + i, 1, 1, fila.length).setValues([fila]);
         found = true;
       }
@@ -94,16 +106,21 @@ function writeMetas(ss, data) {
   });
 }
 
+// FIX (2026-09-22, mismo caso que writeValorizacion arriba): 'ando' también
+// está en EMPRESAS_OBJ_CON_ANIO... la fila real es
+// [empresa_id,Sucursal,Mes,Año,Residuo,...] pero la clave de borrado seguía
+// comparando solo empresa_id+Mes, sin Año — mismo fix ya aplicado en
+// Code-Ando-Visor.gs.
 function writeTrazabilidad(ss, data) {
   const sheet = ss.getSheetByName('📊 Trazabilidad_Docs') || ss.getSheetByName('Trazabilidad_Docs');
   if (!sheet) throw new Error('Hoja Trazabilidad_Docs no encontrada');
   const startRow = 6;
   const lastRow = sheet.getLastRow();
   if (lastRow >= startRow) {
-    const cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 3).getValues();
-    const keys = new Set(data.filas.map(f => f[0] + '|' + f[2]));
+    const cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 4).getValues();
+    const keys = new Set(data.filas.map(f => f[0] + '|' + f[2] + '|' + f[3]));
     const toDelete = [];
-    cols.forEach((r, i) => { if (keys.has(r[0] + '|' + r[2])) toDelete.push(startRow + i); });
+    cols.forEach((r, i) => { if (keys.has(r[0] + '|' + r[2] + '|' + r[3])) toDelete.push(startRow + i); });
     toDelete.reverse().forEach(r => sheet.deleteRow(r));
   }
   const insertRow = sheet.getLastRow() + 1;
@@ -121,16 +138,22 @@ function writeTrazabilidad(ss, data) {
 // sync nunca vuelve a mandarlas (calcObjetivos() nunca calcula un estado
 // para tipo 'manual', asi que no se reinsertan). Ahora borra por
 // empresa_id+mes+Objetivo exacto, para no arrastrar filas de otros objetivos.
+// FIX (2026-09-22): al agregarse la columna Año, el texto del Objetivo pasó
+// de la posición 3 a la 4 — la clave de borrado seguía usando f[3] (ahora
+// Año, no Objetivo), así que sincronizar CUALQUIER objetivo calculado
+// borraba TODOS los demás objetivos (incluidos los manuales) de ese mismo
+// mes+año. Se corrige a empresa_id+Mes+Año+Objetivo (índices 0,2,3,4),
+// mismo fix ya aplicado en Code-Ando-Visor.gs.
 function writeObjetivos(ss, data) {
   const sheet = ss.getSheetByName('🎯 Objetivos') || ss.getSheetByName('Objetivos');
   if (!sheet) throw new Error('Hoja Objetivos no encontrada');
   const startRow = 6;
   const lastRow = sheet.getLastRow();
   if (lastRow >= startRow) {
-    const cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 4).getValues();
-    const keys = new Set(data.filas.map(f => f[0] + '|' + f[2] + '|' + f[3]));
+    const cols = sheet.getRange(startRow, 1, lastRow - startRow + 1, 5).getValues();
+    const keys = new Set(data.filas.map(f => f[0] + '|' + f[2] + '|' + f[3] + '|' + f[4]));
     const toDelete = [];
-    cols.forEach((r, i) => { if (keys.has(r[0] + '|' + r[2] + '|' + r[3])) toDelete.push(startRow + i); });
+    cols.forEach((r, i) => { if (keys.has(r[0] + '|' + r[2] + '|' + r[3] + '|' + r[4])) toDelete.push(startRow + i); });
     toDelete.reverse().forEach(r => sheet.deleteRow(r));
   }
   const insertRow = sheet.getLastRow() + 1;
