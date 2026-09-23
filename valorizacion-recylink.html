@@ -278,6 +278,7 @@ tbody tr:hover{background:var(--surface2)}
   <div class="salud-drawer-header">
     <span class="salud-drawer-title">Salud de empresas</span>
     <div style="display:flex;gap:2px">
+      <button id="btn-empresas-cerradas" class="salud-close-btn" title="Gestionar empresas cerradas (no se leen sus Excel)">&#127970;</button>
       <button id="btn-salud-pin" class="salud-close-btn" title="Fijar panel (queda al lado del contenido, sin tapar nada)">&#128204;</button>
       <button id="btn-salud-close" class="salud-close-btn">&times;</button>
     </div>
@@ -331,6 +332,27 @@ tbody tr:hover{background:var(--surface2)}
         <button class="btn btn-primary" id="btn-manual-obj-guardar">Guardar</button>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- Modal para marcar empresas cerradas (agregado 2026-09-23, a pedido del
+     usuario: "quiero poder cerrar empresas y con esto no leer dichos
+     excel") — una empresa marcada como cerrada no aparece en el selector
+     de empresas (pills) ni se consulta en el Panel de Salud
+     (cargarSaludTodas), evitando llamadas innecesarias a su Apps
+     Script/Sheet. Se guarda en localStorage (mismo criterio ya usado en
+     esta misma app para "salud_pinned"): es una preferencia de quien usa
+     este panel interno, no un dato que deba compartirse entre navegadores. -->
+<div id="empresas-cerradas-modal" class="stats-modal-overlay">
+  <div class="stats-modal-box" style="max-width:380px">
+    <div class="stats-modal-header">
+      <span class="stats-modal-title">&#127970; Empresas cerradas</span>
+      <button id="btn-empresas-cerradas-close" class="salud-close-btn">&times;</button>
+    </div>
+    <div style="font-size:11px;color:var(--text-muted);margin-bottom:12px;line-height:1.5">
+      Marca las empresas que ya no est&aacute;n activas: dejan de aparecer en el selector de arriba y no se consulta su Excel en el Panel de Salud.
+    </div>
+    <div id="empresas-cerradas-list" style="display:flex;flex-direction:column;gap:6px;max-height:340px;overflow-y:auto;"></div>
   </div>
 </div>
 
@@ -1205,7 +1227,11 @@ function fetchJsonConReintento_(url, intentosRestantes, delayMs) {
 function cargarSaludTodas() {
   saludCargando = true;
   renderSaludPanel();
-  var ids = Object.keys(EMPRESAS);
+  // No se consulta el Excel de las empresas marcadas como cerradas (ver
+  // getEmpresasCerradas_ más arriba) — antes esto pedía las 12 Sheets en
+  // paralelo sin importar si la empresa seguía activa o no.
+  var cerradas = getEmpresasCerradas_();
+  var ids = Object.keys(EMPRESAS).filter(function(id){ return cerradas.indexOf(id) === -1; });
   return Promise.all(ids.map(function(id){
     return fetchJsonConReintento_(EMPRESAS[id].scriptUrl, 3, 1500)
       .then(function(data){
@@ -1460,11 +1486,63 @@ document.querySelectorAll('.tab').forEach(function(btn) {
   });
 });
 
+// Empresas cerradas (agregado 2026-09-23, a pedido del usuario: "quiero
+// poder cerrar empresas y con esto no leer dichos excel") — se guarda en
+// localStorage, mismo criterio ya usado en esta app para "salud_pinned":
+// es una preferencia de quien usa este panel interno, no un dato de
+// cliente que deba compartirse entre navegadores/usuarios. Una empresa
+// cerrada: (1) no aparece en el selector de empresas (pills), así que
+// nunca se dispara loadFromSheets() para ella; (2) se excluye de
+// cargarSaludTodas(), que es lo que realmente consulta las 12 Sheets en
+// paralelo cada vez que se abre/actualiza el Panel de Salud.
+var EMPRESAS_CERRADAS_LS_KEY = 'empresas_cerradas';
+function getEmpresasCerradas_() {
+  try { return JSON.parse(localStorage.getItem(EMPRESAS_CERRADAS_LS_KEY) || '[]'); }
+  catch(e) { return []; }
+}
+function setEmpresasCerradas_(lista) {
+  try { localStorage.setItem(EMPRESAS_CERRADAS_LS_KEY, JSON.stringify(lista)); } catch(e) {}
+}
+function esEmpresaCerrada_(id) { return getEmpresasCerradas_().indexOf(id) !== -1; }
+
+function abrirEmpresasCerradasModal_() {
+  var cerradas = getEmpresasCerradas_();
+  var list = document.getElementById('empresas-cerradas-list');
+  list.innerHTML = Object.keys(EMPRESAS).map(function(id){
+    var checked = cerradas.indexOf(id) !== -1 ? ' checked' : '';
+    return '<label style="display:flex;align-items:center;gap:8px;font-size:13px;padding:4px 0;cursor:pointer">'
+      + '<input type="checkbox" class="chk-empresa-cerrada" data-id="'+id+'"'+checked+'>'
+      + EMPRESAS[id].nombre
+      + '</label>';
+  }).join('');
+  document.getElementById('empresas-cerradas-modal').classList.add('open');
+}
+function cerrarEmpresasCerradasModal_() {
+  var seleccionadas = Array.prototype.map.call(
+    document.querySelectorAll('.chk-empresa-cerrada:checked'),
+    function(chk){ return chk.dataset.id; }
+  );
+  setEmpresasCerradas_(seleccionadas);
+  document.getElementById('empresas-cerradas-modal').classList.remove('open');
+  initEmpresaPills();
+  cargarSaludTodas();
+}
+
 // Empresa pills
 function initEmpresaPills() {
   var container = document.getElementById('empresa-pills');
   container.innerHTML = '';
-  Object.keys(EMPRESAS).forEach(function(key) {
+  var cerradas = getEmpresasCerradas_();
+  var idsAbiertos = Object.keys(EMPRESAS).filter(function(id){ return cerradas.indexOf(id) === -1; });
+  // Si la empresa actualmente seleccionada se acaba de cerrar, cambiar a la
+  // primera empresa abierta disponible para no quedar mostrando una vista
+  // de una empresa que ya no aparece en el selector.
+  if (idsAbiertos.indexOf(empresaActual) === -1 && idsAbiertos.length) {
+    empresaActual = idsAbiertos[0];
+    resetData();
+    loadFromSheets();
+  }
+  idsAbiertos.forEach(function(key) {
     var emp = EMPRESAS[key];
     var pill = document.createElement('button');
     pill.className = 'empresa-pill'+(key===empresaActual?' active':'');
@@ -4438,7 +4516,8 @@ function renderSaludPanel() {
     list.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-muted);font-size:12px">Cargando salud de las empresas&hellip;</div>';
     return;
   }
-  var ids = Object.keys(EMPRESAS);
+  var cerradas = getEmpresasCerradas_();
+  var ids = Object.keys(EMPRESAS).filter(function(id){ return cerradas.indexOf(id) === -1; });
   var filas = ids.map(function(id){
     var sucs = saludPorEmpresa[id];
     if (!sucs || sucs === 'error') {
@@ -4668,6 +4747,8 @@ function abrirStatsModal() {
 document.getElementById('btn-salud-toggle').addEventListener('click', abrirSaludDrawer);
 document.getElementById('btn-salud-close').addEventListener('click', cerrarSaludDrawer);
 document.getElementById('salud-overlay').addEventListener('click', cerrarSaludDrawer);
+document.getElementById('btn-empresas-cerradas').addEventListener('click', abrirEmpresasCerradasModal_);
+document.getElementById('btn-empresas-cerradas-close').addEventListener('click', cerrarEmpresasCerradasModal_);
 document.getElementById('btn-salud-pin').addEventListener('click', function(){
   saludPinned = !saludPinned;
   try { localStorage.setItem('salud_pinned', saludPinned ? '1' : '0'); } catch(e) {}
