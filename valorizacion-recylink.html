@@ -1487,23 +1487,52 @@ document.querySelectorAll('.tab').forEach(function(btn) {
 });
 
 // Empresas cerradas (agregado 2026-09-23, a pedido del usuario: "quiero
-// poder cerrar empresas y con esto no leer dichos excel") — se guarda en
-// localStorage, mismo criterio ya usado en esta app para "salud_pinned":
-// es una preferencia de quien usa este panel interno, no un dato de
-// cliente que deba compartirse entre navegadores/usuarios. Una empresa
-// cerrada: (1) no aparece en el selector de empresas (pills), así que
-// nunca se dispara loadFromSheets() para ella; (2) se excluye de
-// cargarSaludTodas(), que es lo que realmente consulta las 12 Sheets en
-// paralelo cada vez que se abre/actualiza el Panel de Salud.
-var EMPRESAS_CERRADAS_LS_KEY = 'empresas_cerradas';
-function getEmpresasCerradas_() {
-  try { return JSON.parse(localStorage.getItem(EMPRESAS_CERRADAS_LS_KEY) || '[]'); }
-  catch(e) { return []; }
+// poder cerrar empresas y con esto no leer dichos excel") — originalmente
+// se guardaba en localStorage, pero eso se pierde en incógnito o al
+// cambiar de navegador/computador (a pedido del usuario, 2026-09-23: "que
+// no dependa del navegador"). Ahora se guarda en un Sheet dedicado, NUEVO
+// Y SEPARADO de los de cada cliente (ver Code-EmpresasCerradas.gs) — no es
+// dato de ningún cliente, es config interna de este panel.
+//
+// getEmpresasCerradas_() sigue siendo síncrona (lee de
+// empresasCerradasCache, en memoria) para no tener que convertir en
+// async todos los call sites existentes (initEmpresaPills,
+// cargarSaludTodas, renderSaludPanel, el modal) — el cache se llena una
+// vez al cargar la página (cargarEmpresasCerradas_) y se actualiza de
+// forma optimista en cada cierre/apertura, antes de que la escritura al
+// Sheet termine.
+var EMPRESAS_CERRADAS_SCRIPT_URL = 'PENDIENTE_PEGAR_URL_DEL_DEPLOYMENT';
+var empresasCerradasCache = [];
+function getEmpresasCerradas_() { return empresasCerradasCache; }
+function esEmpresaCerrada_(id) { return empresasCerradasCache.indexOf(id) !== -1; }
+
+// Carga inicial desde el Sheet — se llama una sola vez al arrancar la
+// página, antes del primer initEmpresaPills()/cargarSaludTodas(). Si el
+// fetch falla (ej. URL todavía no configurada, o Apps Script caído), se
+// sigue con la lista vacía (ninguna empresa cerrada) en vez de romper el
+// resto de la app — mismo criterio de "degradar sin romper" ya usado para
+// el resto de las llamadas a Sheets de esta app.
+function cargarEmpresasCerradas_() {
+  if (!EMPRESAS_CERRADAS_SCRIPT_URL || EMPRESAS_CERRADAS_SCRIPT_URL.indexOf('PENDIENTE') === 0) return Promise.resolve();
+  return fetch(EMPRESAS_CERRADAS_SCRIPT_URL + '?_=' + Date.now())
+    .then(function(r){ return r.json(); })
+    .then(function(data){ empresasCerradasCache = (data && data.empresasCerradas) || []; })
+    .catch(function(err){ console.warn('No se pudo cargar Empresas Cerradas:', err); });
 }
+
+// Guarda la lista completa (reemplazo total, mismo criterio que "⚙️ Obras
+// Cerradas"/"⚙️ Sucursales Cerradas") — actualiza el cache local de
+// inmediato (optimista, la UI no espera la respuesta del servidor) y
+// dispara el POST en segundo plano.
 function setEmpresasCerradas_(lista) {
-  try { localStorage.setItem(EMPRESAS_CERRADAS_LS_KEY, JSON.stringify(lista)); } catch(e) {}
+  empresasCerradasCache = lista;
+  if (!EMPRESAS_CERRADAS_SCRIPT_URL || EMPRESAS_CERRADAS_SCRIPT_URL.indexOf('PENDIENTE') === 0) return;
+  fetch(EMPRESAS_CERRADAS_SCRIPT_URL, {
+    method: 'POST', mode: 'no-cors',
+    headers: {'Content-Type': 'text/plain;charset=utf-8'},
+    body: JSON.stringify({ tipo: 'empresasCerradas', empresas: lista })
+  }).catch(function(err){ console.warn('No se pudo guardar Empresas Cerradas:', err); });
 }
-function esEmpresaCerrada_(id) { return getEmpresasCerradas_().indexOf(id) !== -1; }
 
 function abrirEmpresasCerradasModal_() {
   var cerradas = getEmpresasCerradas_();
@@ -4799,10 +4828,19 @@ document.getElementById('btn-stats-close').addEventListener('click', function(){
 });
 
 document.addEventListener('DOMContentLoaded',function(){
+  // initEmpresaPills() corre de inmediato (rápido, sin red) asumiendo
+  // "ninguna empresa cerrada" y se vuelve a llamar apenas llega la lista
+  // real. cargarSaludTodas() SÍ espera a conocer la lista de cerradas
+  // antes de disparar el fetch masivo — todo el punto de esta func es
+  // evitar leer Sheets de más, así que no tendría sentido llamarla 2
+  // veces (una de más, antes de saber qué está cerrado, y otra después).
   initEmpresaPills();
   renderTrazHeaders();
   loadFromSheets();
-  cargarSaludTodas();
+  cargarEmpresasCerradas_().then(function(){
+    initEmpresaPills();
+    cargarSaludTodas();
+  });
   if (saludPinned) abrirSaludDrawer();
 });
 </script>
