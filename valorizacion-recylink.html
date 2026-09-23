@@ -1501,7 +1501,7 @@ document.querySelectorAll('.tab').forEach(function(btn) {
 // vez al cargar la página (cargarEmpresasCerradas_) y se actualiza de
 // forma optimista en cada cierre/apertura, antes de que la escritura al
 // Sheet termine.
-var EMPRESAS_CERRADAS_SCRIPT_URL = 'PENDIENTE_PEGAR_URL_DEL_DEPLOYMENT';
+var EMPRESAS_CERRADAS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzTu7As_E4Lyv3fkAFm6xuOEr01klEbbF_nzxTG3uz1ugPkhBDyf9gzKKF3J3FtYigV/exec';
 var empresasCerradasCache = [];
 function getEmpresasCerradas_() { return empresasCerradasCache; }
 function esEmpresaCerrada_(id) { return empresasCerradasCache.indexOf(id) !== -1; }
