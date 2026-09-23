@@ -145,6 +145,7 @@ tbody tr:hover{background:var(--surface2)}
   <div class="empresa-bar">
     <label>Empresa</label>
     <div class="empresa-pills" id="empresa-pills"></div>
+    <button id="btn-empresas-cerradas" class="btn btn-ghost" style="padding:5px 9px;font-size:12px;" title="Cerrar/reabrir empresas (no se leen sus Excel)">&#127970; Empresas cerradas</button>
   </div>
 
   <div class="sync-bar">
@@ -278,7 +279,6 @@ tbody tr:hover{background:var(--surface2)}
   <div class="salud-drawer-header">
     <span class="salud-drawer-title">Salud de empresas</span>
     <div style="display:flex;gap:2px">
-      <button id="btn-empresas-cerradas" class="salud-close-btn" title="Gestionar empresas cerradas (no se leen sus Excel)">&#127970;</button>
       <button id="btn-salud-pin" class="salud-close-btn" title="Fijar panel (queda al lado del contenido, sin tapar nada)">&#128204;</button>
       <button id="btn-salud-close" class="salud-close-btn">&times;</button>
     </div>
@@ -1546,6 +1546,8 @@ function initEmpresaPills() {
     var emp = EMPRESAS[key];
     var pill = document.createElement('button');
     pill.className = 'empresa-pill'+(key===empresaActual?' active':'');
+    pill.style.position = 'relative';
+    pill.style.paddingRight = '22px';
     pill.textContent = emp.nombre;
     pill.addEventListener('click', function() {
       empresaActual = key;
@@ -1554,6 +1556,24 @@ function initEmpresaPills() {
       resetData();
       loadFromSheets();
     });
+    // Cerrar directo desde la propia empresa (a pedido del usuario,
+    // 2026-09-23: "es mejor que se de la opción de cerrar la empresa desde
+    // la empresa, porque el panel de salud tarda mucho en cargar") — un
+    // clic aquí la agrega a "empresas cerradas" sin tener que abrir el
+    // Panel de Salud ni ningún modal. Reabrir sigue siendo vía el botón
+    // "🏢 Empresas cerradas" junto al selector.
+    var btnCerrar = document.createElement('span');
+    btnCerrar.textContent = '×';
+    btnCerrar.title = 'Cerrar '+emp.nombre+' (no se leerá su Excel)';
+    btnCerrar.style.cssText = 'position:absolute;right:6px;top:50%;transform:translateY(-50%);font-size:14px;font-weight:700;line-height:1;opacity:.55;cursor:pointer;';
+    btnCerrar.addEventListener('click', function(ev){
+      ev.stopPropagation();
+      var actuales = getEmpresasCerradas_();
+      if (actuales.indexOf(key) === -1) actuales.push(key);
+      setEmpresasCerradas_(actuales);
+      initEmpresaPills();
+    });
+    pill.appendChild(btnCerrar);
     container.appendChild(pill);
   });
 }
