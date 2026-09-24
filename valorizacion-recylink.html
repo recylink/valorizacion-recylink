@@ -1618,6 +1618,17 @@ function cerrarEmpresasCerradasModal_() {
 // borraría cerradas/CSE al no encontrar los checkboxes/inputs de edición).
 var resumenCseChartInst = null;
 var RESUMEN_CSE_COLORES = ['#0ca30c','#2563eb','#d4900a','#dc2626','#7c3aed','#0891b2','#db2777','#65a30d'];
+// Color estable por nombre de CSE (mismo nombre -> mismo color siempre,
+// sin importar el orden en que aparezcan) — a pedido del usuario, 2026-
+// 09-24: "que aparezca un texto indicando el CSE con un color diferente
+// por cada CSE" en el Panel de Salud. Hash simple de caracteres para
+// elegir un índice estable dentro de la misma paleta que ya usa el
+// gráfico de "Resumen CSE".
+function colorParaCse_(nombre) {
+  var hash = 0;
+  for (var i = 0; i < nombre.length; i++) hash = (hash * 31 + nombre.charCodeAt(i)) >>> 0;
+  return RESUMEN_CSE_COLORES[hash % RESUMEN_CSE_COLORES.length];
+}
 function abrirResumenCseModal_() {
   var porCse = {}; // { nombreCse: { empresas: [nombre,...], sucursales: n } }
   Object.keys(cseAsignadoCache).forEach(function(id){
@@ -4719,10 +4730,15 @@ function renderSaludPanel() {
         + '<span class="salud-badge" style="background:'+c+'">'+s.estado+' '+Math.round(s.pct)+'%</span></div>';
     }).join('');
     var nSucs = f.sucs.length;
+    var cseNombre = getCseDeEmpresa_(f.id);
+    var cseHtml = cseNombre
+      ? ' <span style="font-weight:700;color:'+colorParaCse_(cseNombre)+';">· '+cseNombre+'</span>'
+      : '';
     return '<div class="salud-empresa-row">'
       + '<div class="salud-empresa-head">'
       +   '<span class="salud-empresa-nombre salud-empresa-expand" data-id="'+f.id+'">'+f.nombre
       +     (nSucs ? ' <span style="font-weight:400;color:var(--text-muted)">('+nSucs+' suc.)</span>' : '')
+      +     cseHtml
       +   '</span>'
       +   '<span class="salud-empresa-nav" data-id="'+f.id+'" title="Ver objetivos de '+f.nombre+'">&#8599;</span>'
       +   '<span class="salud-badge" style="background:'+colorAvg+'">'+labelAvg+'</span>'
