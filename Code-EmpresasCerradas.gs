@@ -15,6 +15,14 @@
  * Requiere una pestaña "Empresas Cerradas" con el header "Empresa" en
  * A1 (una fila por empresa cerrada, guardando el id tal cual aparece
  * en el objeto EMPRESAS de valorizacion-recylink.html, ej. "salfa").
+ *
+ * AGREGADO 2026-09-24, a pedido del usuario: "quisiera añadir los CSE
+ * (Customer Success Executive) de cada empresa y después saber cuántas
+ * empresas y sucursales tiene dicho CSE" — requiere una segunda pestaña
+ * "CSE" con headers "Empresa" (A1) y "CSE" (B1). Una fila por empresa que
+ * ya tiene un CSE asignado (empresa_id | nombre del CSE) — a diferencia de
+ * "Empresas Cerradas" (lista sparse de las cerradas), acá se guarda una
+ * fila por CADA empresa con CSE asignado, sin importar si está cerrada.
  * ============================================================
  */
 
@@ -59,9 +67,46 @@ function writeEmpresasCerradas_(ss, data) {
   }
 }
 
+// Lee "CSE" (Empresa | CSE) — una fila por empresa con CSE asignado.
+function readCseAsignadoSheet_() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('CSE');
+  if (!sheet) return [];
+  var headerRow = buscarFilaEncabezado_(sheet, 'Empresa');
+  if (!headerRow) return [];
+  var startRow = headerRow + 1;
+  var lastRow = sheet.getLastRow();
+  if (lastRow < startRow) return [];
+  var data = sheet.getRange(startRow, 1, lastRow - startRow + 1, 2).getValues();
+  return data
+    .map(function (r) { return { Empresa: String(r[0] || '').trim(), CSE: String(r[1] || '').trim() }; })
+    .filter(function (r) { return r.Empresa !== ''; });
+}
+
+// Reemplaza la lista completa cada vez (el cliente siempre manda el set
+// vigente completo — una fila por cada empresa que tiene un CSE asignado;
+// una empresa sin CSE simplemente no aparece).
+function writeCseAsignado_(ss, data) {
+  var sheet = ss.getSheetByName('CSE');
+  if (!sheet) throw new Error('Hoja "CSE" no encontrada');
+  var headerRow = buscarFilaEncabezado_(sheet, 'Empresa');
+  if (!headerRow) throw new Error('No se encontro la fila de encabezado ("Empresa") en CSE');
+  var startRow = headerRow + 1;
+  var lastRow = sheet.getLastRow();
+  if (lastRow >= startRow) {
+    sheet.getRange(startRow, 1, lastRow - startRow + 1, 2).clearContent();
+  }
+  var asignaciones = data.asignaciones || []; // [[empresaId, cseNombre], ...]
+  if (asignaciones.length > 0) {
+    sheet.getRange(startRow, 1, asignaciones.length, 2).setValues(asignaciones);
+  }
+}
+
 function doGet(e) {
   return ContentService
-    .createTextOutput(JSON.stringify({ empresasCerradas: readEmpresasCerradasSheet_() }))
+    .createTextOutput(JSON.stringify({
+      empresasCerradas: readEmpresasCerradasSheet_(),
+      cseAsignado: readCseAsignadoSheet_()
+    }))
     .setMimeType(ContentService.MimeType.JSON);
 }
 
@@ -70,6 +115,7 @@ function doPost(e) {
     var data = JSON.parse(e.postData.contents);
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     if (data.tipo === 'empresasCerradas') writeEmpresasCerradas_(ss, data);
+    else if (data.tipo === 'cseAsignado') writeCseAsignado_(ss, data);
 
     return ContentService
       .createTextOutput(JSON.stringify({ ok: true }))

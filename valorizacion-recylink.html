@@ -145,7 +145,8 @@ tbody tr:hover{background:var(--surface2)}
   <div class="empresa-bar">
     <label>Empresa</label>
     <div class="empresa-pills" id="empresa-pills"></div>
-    <button id="btn-empresas-cerradas" class="btn btn-ghost" style="padding:5px 9px;font-size:12px;" title="Cerrar/reabrir empresas (no se leen sus Excel)">&#127970; Empresas cerradas</button>
+    <button id="btn-empresas-cerradas" class="btn btn-ghost" style="padding:5px 9px;font-size:12px;" title="Cerrar/reabrir empresas y asignar CSE (no se leen sus Excel)">&#127970; Empresas cerradas</button>
+    <button id="btn-resumen-cse" class="btn btn-ghost" style="padding:5px 9px;font-size:12px;" title="Ver cuántas empresas y sucursales tiene cada CSE">&#128202; Resumen CSE</button>
   </div>
 
   <div class="sync-bar">
@@ -350,9 +351,23 @@ tbody tr:hover{background:var(--surface2)}
       <button id="btn-empresas-cerradas-close" class="salud-close-btn">&times;</button>
     </div>
     <div style="font-size:11px;color:var(--text-muted);margin-bottom:12px;line-height:1.5">
-      Marca las empresas que ya no est&aacute;n activas: dejan de aparecer en el selector de arriba y no se consulta su Excel en el Panel de Salud.
+      Marca las empresas que ya no est&aacute;n activas: dejan de aparecer en el selector de arriba y no se consulta su Excel en el Panel de Salud. El campo de texto asigna el CSE (Customer Success Executive) responsable de esa empresa.
     </div>
     <div id="empresas-cerradas-list" style="display:flex;flex-direction:column;gap:6px;max-height:340px;overflow-y:auto;"></div>
+  </div>
+</div>
+
+<!-- Modal de resumen por CSE (agregado 2026-09-24, a pedido del usuario:
+     "saber cuántas empresas y sucursales tiene dicho CSE") — modal
+     PROPIO, separado del de "Empresas Cerradas" arriba, para que cerrarlo
+     nunca dispare el guardado de esa otra pantalla. -->
+<div id="resumen-cse-modal" class="stats-modal-overlay">
+  <div class="stats-modal-box" style="max-width:380px">
+    <div class="stats-modal-header">
+      <span class="stats-modal-title">&#128202; Resumen por CSE</span>
+      <button id="btn-resumen-cse-close" class="salud-close-btn">&times;</button>
+    </div>
+    <div id="resumen-cse-list" style="max-height:360px;overflow-y:auto;"></div>
   </div>
 </div>
 
@@ -1506,6 +1521,14 @@ var empresasCerradasCache = [];
 function getEmpresasCerradas_() { return empresasCerradasCache; }
 function esEmpresaCerrada_(id) { return empresasCerradasCache.indexOf(id) !== -1; }
 
+// CSE (Customer Success Executive) asignado por empresa — agregado
+// 2026-09-24, a pedido del usuario: "añadir los CSE de cada empresa y
+// después saber cuántas empresas y sucursales tiene dicho CSE". Mismo
+// Sheet/Apps Script dedicado que "Empresas Cerradas" (pestaña "CSE"
+// nueva), mismo criterio de cache en memoria + actualización optimista.
+var cseAsignadoCache = {}; // { empresaId: "Nombre del CSE" }
+function getCseDeEmpresa_(id) { return cseAsignadoCache[id] || ''; }
+
 // Carga inicial desde el Sheet — se llama una sola vez al arrancar la
 // página, antes del primer initEmpresaPills()/cargarSaludTodas(). Si el
 // fetch falla (ej. URL todavía no configurada, o Apps Script caído), se
@@ -1516,8 +1539,13 @@ function cargarEmpresasCerradas_() {
   if (!EMPRESAS_CERRADAS_SCRIPT_URL || EMPRESAS_CERRADAS_SCRIPT_URL.indexOf('PENDIENTE') === 0) return Promise.resolve();
   return fetch(EMPRESAS_CERRADAS_SCRIPT_URL + '?_=' + Date.now())
     .then(function(r){ return r.json(); })
-    .then(function(data){ empresasCerradasCache = (data && data.empresasCerradas) || []; })
-    .catch(function(err){ console.warn('No se pudo cargar Empresas Cerradas:', err); });
+    .then(function(data){
+      empresasCerradasCache = (data && data.empresasCerradas) || [];
+      var mapa = {};
+      ((data && data.cseAsignado) || []).forEach(function(r){ if (r.Empresa) mapa[r.Empresa] = r.CSE; });
+      cseAsignadoCache = mapa;
+    })
+    .catch(function(err){ console.warn('No se pudo cargar Empresas Cerradas/CSE:', err); });
 }
 
 // Guarda la lista completa (reemplazo total, mismo criterio que "⚙️ Obras
@@ -1534,15 +1562,32 @@ function setEmpresasCerradas_(lista) {
   }).catch(function(err){ console.warn('No se pudo guardar Empresas Cerradas:', err); });
 }
 
+// mapa: { empresaId: "Nombre del CSE" } completo (una empresa sin CSE se
+// omite directamente, no se manda con valor vacío).
+function setCseAsignado_(mapa) {
+  cseAsignadoCache = mapa;
+  if (!EMPRESAS_CERRADAS_SCRIPT_URL || EMPRESAS_CERRADAS_SCRIPT_URL.indexOf('PENDIENTE') === 0) return;
+  var asignaciones = Object.keys(mapa).filter(function(id){ return mapa[id]; }).map(function(id){ return [id, mapa[id]]; });
+  fetch(EMPRESAS_CERRADAS_SCRIPT_URL, {
+    method: 'POST', mode: 'no-cors',
+    headers: {'Content-Type': 'text/plain;charset=utf-8'},
+    body: JSON.stringify({ tipo: 'cseAsignado', asignaciones: asignaciones })
+  }).catch(function(err){ console.warn('No se pudo guardar CSE asignado:', err); });
+}
+
 function abrirEmpresasCerradasModal_() {
   var cerradas = getEmpresasCerradas_();
   var list = document.getElementById('empresas-cerradas-list');
   list.innerHTML = Object.keys(EMPRESAS).map(function(id){
     var checked = cerradas.indexOf(id) !== -1 ? ' checked' : '';
-    return '<label style="display:flex;align-items:center;gap:8px;font-size:13px;padding:4px 0;cursor:pointer">'
-      + '<input type="checkbox" class="chk-empresa-cerrada" data-id="'+id+'"'+checked+'>'
-      + EMPRESAS[id].nombre
-      + '</label>';
+    return '<div style="display:flex;align-items:center;gap:8px;padding:4px 0;">'
+      + '<label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;flex:1;min-width:0;">'
+      +   '<input type="checkbox" class="chk-empresa-cerrada" data-id="'+id+'"'+checked+'>'
+      +   '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+EMPRESAS[id].nombre+'</span>'
+      + '</label>'
+      + '<input type="text" class="txt-cse-empresa" data-id="'+id+'" placeholder="CSE" value="'+getCseDeEmpresa_(id).replace(/"/g,'&quot;')+'" '
+      +   'style="width:120px;flex-shrink:0;padding:4px 6px;font-size:12px;border:1px solid var(--border);border-radius:6px;">'
+      + '</div>';
   }).join('');
   document.getElementById('empresas-cerradas-modal').classList.add('open');
 }
@@ -1551,10 +1596,51 @@ function cerrarEmpresasCerradasModal_() {
     document.querySelectorAll('.chk-empresa-cerrada:checked'),
     function(chk){ return chk.dataset.id; }
   );
+  var mapaCse = {};
+  Array.prototype.forEach.call(document.querySelectorAll('.txt-cse-empresa'), function(inp){
+    mapaCse[inp.dataset.id] = inp.value.trim();
+  });
   setEmpresasCerradas_(seleccionadas);
+  setCseAsignado_(mapaCse);
   document.getElementById('empresas-cerradas-modal').classList.remove('open');
   initEmpresaPills();
   cargarSaludTodas();
+}
+
+// Resumen por CSE: cuántas empresas y sucursales tiene asignadas cada uno
+// (a pedido del usuario). El conteo de sucursales usa saludPorEmpresa (ya
+// cargado por el Panel de Salud) — no dispara ninguna llamada nueva a
+// Sheets, reutiliza lo que ya se pidió para el Panel de Salud. Modal
+// PROPIO y separado del de "Empresas Cerradas" (a propósito: si
+// reutilizara el mismo contenedor, cerrarlo con el botón de guardar
+// borraría cerradas/CSE al no encontrar los checkboxes/inputs de edición).
+function abrirResumenCseModal_() {
+  var porCse = {}; // { nombreCse: { empresas: [nombre,...], sucursales: n } }
+  Object.keys(cseAsignadoCache).forEach(function(id){
+    var cse = cseAsignadoCache[id];
+    if (!cse || !EMPRESAS[id]) return;
+    porCse[cse] = porCse[cse] || { empresas: [], sucursales: 0 };
+    porCse[cse].empresas.push(EMPRESAS[id].nombre);
+    var sucs = saludPorEmpresa[id];
+    porCse[cse].sucursales += (sucs && sucs !== 'error') ? sucs.length : 0;
+  });
+  var nombres = Object.keys(porCse).sort();
+  var list = document.getElementById('resumen-cse-list');
+  list.innerHTML = nombres.length
+    ? nombres.map(function(cse){
+        var d = porCse[cse];
+        return '<div style="padding:8px 0;border-bottom:1px solid var(--border);">'
+          + '<div style="font-size:13px;font-weight:700;">'+cse+'</div>'
+          + '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">'
+          +   d.empresas.length+' empresa'+(d.empresas.length===1?'':'s')+' ('+d.empresas.join(', ')+') · '
+          +   d.sucursales+' sucursal'+(d.sucursales===1?'':'es')
+          + '</div></div>';
+      }).join('')
+    : '<div style="font-size:12px;color:var(--text-muted);padding:12px 0;">Todavía no hay ningún CSE asignado. Ábrelo desde "🏢 Empresas cerradas" para asignar uno.</div>';
+  document.getElementById('resumen-cse-modal').classList.add('open');
+}
+function cerrarResumenCseModal_() {
+  document.getElementById('resumen-cse-modal').classList.remove('open');
 }
 
 // Empresa pills
@@ -4798,6 +4884,8 @@ document.getElementById('btn-salud-close').addEventListener('click', cerrarSalud
 document.getElementById('salud-overlay').addEventListener('click', cerrarSaludDrawer);
 document.getElementById('btn-empresas-cerradas').addEventListener('click', abrirEmpresasCerradasModal_);
 document.getElementById('btn-empresas-cerradas-close').addEventListener('click', cerrarEmpresasCerradasModal_);
+document.getElementById('btn-resumen-cse').addEventListener('click', abrirResumenCseModal_);
+document.getElementById('btn-resumen-cse-close').addEventListener('click', cerrarResumenCseModal_);
 document.getElementById('btn-salud-pin').addEventListener('click', function(){
   saludPinned = !saludPinned;
   try { localStorage.setItem('salud_pinned', saludPinned ? '1' : '0'); } catch(e) {}
