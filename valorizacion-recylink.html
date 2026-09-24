@@ -1629,6 +1629,14 @@ function colorParaCse_(nombre) {
   for (var i = 0; i < nombre.length; i++) hash = (hash * 31 + nombre.charCodeAt(i)) >>> 0;
   return RESUMEN_CSE_COLORES[hash % RESUMEN_CSE_COLORES.length];
 }
+// Iniciales del CSE (ej. "Juan Pérez" -> "JP") para el badge en el Panel
+// de Salud — a pedido del usuario: "puede ser una abreviación y con un
+// formato similar al de los %".
+function abreviarCse_(nombre) {
+  var palabras = nombre.trim().split(/\s+/).filter(Boolean);
+  var iniciales = palabras.slice(0, 2).map(function(p){ return p.charAt(0).toUpperCase(); }).join('');
+  return iniciales || nombre.slice(0,2).toUpperCase();
+}
 function abrirResumenCseModal_() {
   var porCse = {}; // { nombreCse: { empresas: [nombre,...], sucursales: n } }
   Object.keys(cseAsignadoCache).forEach(function(id){
@@ -4732,7 +4740,7 @@ function renderSaludPanel() {
     var nSucs = f.sucs.length;
     var cseNombre = getCseDeEmpresa_(f.id);
     var cseHtml = cseNombre
-      ? ' <span style="font-weight:700;color:'+colorParaCse_(cseNombre)+';">· '+cseNombre+'</span>'
+      ? ' <span class="salud-badge" style="background:'+colorParaCse_(cseNombre)+';" title="CSE: '+cseNombre+'">'+abreviarCse_(cseNombre)+'</span>'
       : '';
     return '<div class="salud-empresa-row">'
       + '<div class="salud-empresa-head">'
