@@ -362,12 +362,14 @@ tbody tr:hover{background:var(--surface2)}
      PROPIO, separado del de "Empresas Cerradas" arriba, para que cerrarlo
      nunca dispare el guardado de esa otra pantalla. -->
 <div id="resumen-cse-modal" class="stats-modal-overlay">
-  <div class="stats-modal-box" style="max-width:380px">
+  <div class="stats-modal-box" style="max-width:520px">
     <div class="stats-modal-header">
       <span class="stats-modal-title">&#128202; Resumen por CSE</span>
       <button id="btn-resumen-cse-close" class="salud-close-btn">&times;</button>
     </div>
-    <div id="resumen-cse-list" style="max-height:360px;overflow-y:auto;"></div>
+    <div id="resumen-cse-empty" style="font-size:12px;color:var(--text-muted);padding:12px 0;display:none;">Todav&iacute;a no hay ning&uacute;n CSE asignado. &Aacute;brelo desde "&#127970; Empresas cerradas" para asignar uno.</div>
+    <div id="resumen-cse-chart-wrap" style="position:relative;width:100%;margin-bottom:14px;"><canvas id="resumen-cse-chart"></canvas></div>
+    <div id="resumen-cse-list" style="max-height:220px;overflow-y:auto;"></div>
   </div>
 </div>
 
@@ -1614,6 +1616,8 @@ function cerrarEmpresasCerradasModal_() {
 // PROPIO y separado del de "Empresas Cerradas" (a propósito: si
 // reutilizara el mismo contenedor, cerrarlo con el botón de guardar
 // borraría cerradas/CSE al no encontrar los checkboxes/inputs de edición).
+var resumenCseChartInst = null;
+var RESUMEN_CSE_COLORES = ['#0ca30c','#2563eb','#d4900a','#dc2626','#7c3aed','#0891b2','#db2777','#65a30d'];
 function abrirResumenCseModal_() {
   var porCse = {}; // { nombreCse: { empresas: [nombre,...], sucursales: n } }
   Object.keys(cseAsignadoCache).forEach(function(id){
@@ -1624,20 +1628,55 @@ function abrirResumenCseModal_() {
     var sucs = saludPorEmpresa[id];
     porCse[cse].sucursales += (sucs && sucs !== 'error') ? sucs.length : 0;
   });
-  var nombres = Object.keys(porCse).sort();
+  // Ordenado de mayor a menor carga (sucursales) — el CSE con más
+  // sucursales asignadas queda arriba del gráfico.
+  var nombres = Object.keys(porCse).sort(function(a,b){ return porCse[b].sucursales - porCse[a].sucursales; });
+
+  document.getElementById('resumen-cse-empty').style.display = nombres.length ? 'none' : '';
+  document.getElementById('resumen-cse-chart-wrap').style.display = nombres.length ? '' : 'none';
+
   var list = document.getElementById('resumen-cse-list');
-  list.innerHTML = nombres.length
-    ? nombres.map(function(cse){
-        var d = porCse[cse];
-        return '<div style="padding:8px 0;border-bottom:1px solid var(--border);">'
-          + '<div style="font-size:13px;font-weight:700;">'+cse+'</div>'
-          + '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">'
-          +   d.empresas.length+' empresa'+(d.empresas.length===1?'':'s')+' ('+d.empresas.join(', ')+') · '
-          +   d.sucursales+' sucursal'+(d.sucursales===1?'':'es')
-          + '</div></div>';
-      }).join('')
-    : '<div style="font-size:12px;color:var(--text-muted);padding:12px 0;">Todavía no hay ningún CSE asignado. Ábrelo desde "🏢 Empresas cerradas" para asignar uno.</div>';
+  list.innerHTML = nombres.map(function(cse){
+    var d = porCse[cse];
+    return '<div style="padding:8px 0;border-bottom:1px solid var(--border);">'
+      + '<div style="font-size:13px;font-weight:700;">'+cse+'</div>'
+      + '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">'
+      +   d.empresas.length+' empresa'+(d.empresas.length===1?'':'s')+' ('+d.empresas.join(', ')+') · '
+      +   d.sucursales+' sucursal'+(d.sucursales===1?'':'es')
+      + '</div></div>';
+  }).join('');
+
   document.getElementById('resumen-cse-modal').classList.add('open');
+
+  if (resumenCseChartInst) { resumenCseChartInst.destroy(); resumenCseChartInst = null; }
+  if (nombres.length) {
+    // Alto dinámico según cantidad de CSE, mismo criterio que el gráfico
+    // de "Análisis estadístico" (evita que Chart.js recorte etiquetas por
+    // falta de espacio en el eje de categorías).
+    document.getElementById('resumen-cse-chart-wrap').style.height = Math.max(140, nombres.length*44) + 'px';
+    resumenCseChartInst = new Chart(document.getElementById('resumen-cse-chart'), {
+      type: 'bar',
+      data: {
+        labels: nombres,
+        datasets: [
+          { label: 'Sucursales', data: nombres.map(function(c){ return porCse[c].sucursales; }), backgroundColor: nombres.map(function(_,i){ return RESUMEN_CSE_COLORES[i % RESUMEN_CSE_COLORES.length]; }) },
+          { label: 'Empresas', data: nombres.map(function(c){ return porCse[c].empresas.length; }), backgroundColor: nombres.map(function(_,i){ return RESUMEN_CSE_COLORES[i % RESUMEN_CSE_COLORES.length]+'55'; }) }
+        ]
+      },
+      options: {
+        indexAxis: 'y',
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'bottom' },
+          tooltip: { callbacks: { afterLabel: function(ctx){
+            if (ctx.dataset.label !== 'Empresas') return '';
+            return porCse[ctx.label].empresas.join(', ');
+          } } }
+        },
+        scales: { x: { beginAtZero: true, ticks: { precision: 0 } }, y: { ticks: { autoSkip: false } } }
+      }
+    });
+  }
 }
 function cerrarResumenCseModal_() {
   document.getElementById('resumen-cse-modal').classList.remove('open');
