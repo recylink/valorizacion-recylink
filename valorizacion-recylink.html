@@ -291,6 +291,7 @@ tbody tr:hover{background:var(--surface2)}
   <div class="salud-orden-toggle">
     <button id="btn-orden-peor" class="salud-orden-btn active">Peor &rarr; Mejor</button>
     <button id="btn-orden-mejor" class="salud-orden-btn">Mejor &rarr; Peor</button>
+    <button id="btn-orden-cse" class="salud-orden-btn">Por CSE</button>
   </div>
   <button id="btn-salud-refresh" class="btn btn-ghost" style="width:100%">&#8635; Actualizar</button>
   <div id="salud-list" class="salud-list"></div>
@@ -4719,14 +4720,25 @@ function renderSaludPanel() {
     var avg = sucs.length ? sucs.reduce(function(s,r){return s+r.pct;},0)/sucs.length : null;
     return {id:id, nombre:EMPRESAS[id].nombre, sucs:sucs, avg:avg, error:false};
   });
-  filas.sort(function(a,b){
-    var av = a.avg===null ? -1 : a.avg;
-    var bv = b.avg===null ? -1 : b.avg;
-    return saludOrden === 'peor' ? av-bv : bv-av;
-  });
+  // "Por CSE" (a pedido del usuario, 2026-09-24) agrupa alfabéticamente
+  // por el nombre del CSE asignado — las empresas sin CSE quedan al
+  // final. Dentro del mismo CSE, se ordena por nombre de empresa.
+  if (saludOrden === 'cse') {
+    filas.sort(function(a,b){
+      var ca = getCseDeEmpresa_(a.id) || '￿';
+      var cb = getCseDeEmpresa_(b.id) || '￿';
+      return ca === cb ? a.nombre.localeCompare(b.nombre) : ca.localeCompare(cb);
+    });
+  } else {
+    filas.sort(function(a,b){
+      var av = a.avg===null ? -1 : a.avg;
+      var bv = b.avg===null ? -1 : b.avg;
+      return saludOrden === 'peor' ? av-bv : bv-av;
+    });
+  }
   list.innerHTML = filas.map(function(f){
     var sucsSorted = f.sucs.slice().sort(function(a,b){
-      return saludOrden === 'peor' ? a.pct-b.pct : b.pct-a.pct;
+      return saludOrden === 'mejor' ? b.pct-a.pct : a.pct-b.pct;
     });
     var colorAvg = f.avg===null ? 'var(--text-muted)' : (f.avg>=75?'var(--green)':f.avg>=50?'var(--yellow)':'var(--red)');
     var labelAvg = f.error ? 'Error' : (f.avg===null ? 'Sin datos' : Math.round(f.avg)+'%');
@@ -4739,15 +4751,19 @@ function renderSaludPanel() {
     }).join('');
     var nSucs = f.sucs.length;
     var cseNombre = getCseDeEmpresa_(f.id);
+    // Badge del CSE como elemento propio del flex (no dentro del nombre),
+    // para que quede alineado a la derecha junto al resto de badges — a
+    // pedido del usuario: "pueden estar las etiquetas alineadas a la
+    // derecha?".
     var cseHtml = cseNombre
-      ? ' <span class="salud-badge" style="background:'+colorParaCse_(cseNombre)+';" title="CSE: '+cseNombre+'">'+abreviarCse_(cseNombre)+'</span>'
+      ? '<span class="salud-badge" style="background:'+colorParaCse_(cseNombre)+';" title="CSE: '+cseNombre+'">'+abreviarCse_(cseNombre)+'</span>'
       : '';
     return '<div class="salud-empresa-row">'
       + '<div class="salud-empresa-head">'
       +   '<span class="salud-empresa-nombre salud-empresa-expand" data-id="'+f.id+'">'+f.nombre
       +     (nSucs ? ' <span style="font-weight:400;color:var(--text-muted)">('+nSucs+' suc.)</span>' : '')
-      +     cseHtml
       +   '</span>'
+      +   cseHtml
       +   '<span class="salud-empresa-nav" data-id="'+f.id+'" title="Ver objetivos de '+f.nombre+'">&#8599;</span>'
       +   '<span class="salud-badge" style="background:'+colorAvg+'">'+labelAvg+'</span>'
       + '</div>'
@@ -4958,18 +4974,16 @@ document.getElementById('f-salud-anio').addEventListener('change', function(){
   saludAnio = this.value;
   recalcularSaludTodas_();
 });
-document.getElementById('btn-orden-peor').addEventListener('click', function(){
-  saludOrden = 'peor';
-  document.getElementById('btn-orden-peor').classList.add('active');
-  document.getElementById('btn-orden-mejor').classList.remove('active');
+function setSaludOrden_(orden, btnId) {
+  saludOrden = orden;
+  ['btn-orden-peor','btn-orden-mejor','btn-orden-cse'].forEach(function(id){
+    document.getElementById(id).classList.toggle('active', id === btnId);
+  });
   renderSaludPanel();
-});
-document.getElementById('btn-orden-mejor').addEventListener('click', function(){
-  saludOrden = 'mejor';
-  document.getElementById('btn-orden-mejor').classList.add('active');
-  document.getElementById('btn-orden-peor').classList.remove('active');
-  renderSaludPanel();
-});
+}
+document.getElementById('btn-orden-peor').addEventListener('click', function(){ setSaludOrden_('peor', 'btn-orden-peor'); });
+document.getElementById('btn-orden-mejor').addEventListener('click', function(){ setSaludOrden_('mejor', 'btn-orden-mejor'); });
+document.getElementById('btn-orden-cse').addEventListener('click', function(){ setSaludOrden_('cse', 'btn-orden-cse'); });
 document.getElementById('btn-salud-refresh').addEventListener('click', function(){
   cargarSaludTodas();
 });
