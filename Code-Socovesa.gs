@@ -71,6 +71,22 @@
 // doPost — SIN CAMBIOS DE LÓGICA (salvo el fix de writeObjetivos + minutas)
 // ============================================================
 function doPost(e) {
+  // FIX (2026-09-29): el visor reintenta el guardado con un formulario oculto
+  // si el fetch directo tarda más de 8s (algo frecuente por el "cold start"
+  // de Apps Script), pero esa primera llamada puede seguir ejecutándose en el
+  // servidor. Sin lock, dos doPost concurrentes para la misma minuta nueva
+  // leían la hoja antes de que cualquiera escribiera, así que ambos concluían
+  // "el título no existe" y los dos agregaban un bloque duplicado — el fix de
+  // buscarSesionMinutaPorTitulo_ no alcanza a evitarlo porque no es atómico
+  // entre ejecuciones paralelas. El lock serializa todas las escrituras.
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(30000);
+  } catch (lockErr) {
+    return ContentService
+      .createTextOutput(JSON.stringify({error: 'Servidor ocupado, intenta de nuevo: ' + lockErr.message}))
+      .setMimeType(ContentService.MimeType.JSON);
+  }
   try {
     // Soporta tanto el POST directo (fetch, JSON en el body) como el método
     // de respaldo del visor de Minutas (formulario oculto, llega como
@@ -104,6 +120,8 @@ function doPost(e) {
     return ContentService
       .createTextOutput(JSON.stringify({error: err.message}))
       .setMimeType(ContentService.MimeType.JSON);
+  } finally {
+    lock.releaseLock();
   }
 }
 
