@@ -401,6 +401,14 @@ function writeMinutas_(ss, data) {
     if (neededSize > currentSize) {
       sheet.insertRowsBefore(blockEnd, neededSize - currentSize);
     }
+    // FIX (2026-09-29, caso real encontrado en Code-Socovesa.gs — "no se
+    // eliminó la celda 21 y 22 si yo las eliminé desde el visor"): esta
+    // función solo sabía AGREGAR filas cuando el bloque crecía, nunca
+    // QUITARLAS cuando encogía (ítems borrados en el visor) — las filas
+    // sobrantes del final quedaban con su contenido viejo intacto.
+    else if (neededSize < currentSize) {
+      sheet.deleteRows(dataStartRow + neededSize, currentSize - neededSize);
+    }
 
     for (var i = 0; i < neededSize; i++) {
       var row = rows[i];
