@@ -458,14 +458,28 @@ function writeMinutas_(ss, data) {
   var sheet = encontrarHojaMinuta_();
 
   (data.sessions || []).forEach(function (session) {
-    // Sesión nueva (creada desde el visor con "＋ Nueva minuta", 2026-09-15
-    // — a pedido del usuario, "poder crear minutas como en las otras
-    // empresas"): todavía no tiene fila en el Sheet, así que en vez de
-    // omitirla (como antes) se agrega un bloque nuevo al final — título,
-    // sub-encabezado, ítems y una fila en blanco de separación si ya había
-    // contenido. La próxima vez que se recarguen las minutas, esta sesión
-    // va a tener su propio headerRow real y usará el camino normal de abajo.
-    if (!session.headerRow) {
+    // FIX (2026-09-29, a pedido del usuario: "se fueron creando minutas a
+    // medida que se agregaban items"): una minuta recién creada con "＋
+    // Nueva minuta" llega con headerRow:null. La 1ra vez se agregaba
+    // correctamente un bloque nuevo al final (ver más abajo), pero como
+    // esta función nunca le devolvía al visor la fila real recién creada,
+    // el visor seguía mandando headerRow:null en CADA autoguardado
+    // siguiente (ej. al agregar un 2do ítem) — así que cada guardado
+    // agregaba un bloque nuevo más, en vez de actualizar el que ya existía.
+    // Ahora, antes de decidir que es una minuta realmente nueva, se busca
+    // primero por título exacto en la columna A (mismo criterio que ya
+    // usan Code-Euro.gs/Code-Ando-Visor.gs/Code-Vital.gs) — si ya existe
+    // un bloque con ese título (por haberse creado en un guardado
+    // anterior), se reutiliza en vez de duplicar.
+    var headerRow = session.headerRow || buscarSesionMinutaPorTitulo_(sheet, session.title);
+
+    if (!headerRow) {
+      // Sesión nueva de verdad (creada desde el visor con "＋ Nueva
+      // minuta", 2026-09-15 — a pedido del usuario, "poder crear minutas
+      // como en las otras empresas"): todavía no tiene fila en el Sheet,
+      // así que en vez de omitirla (como antes) se agrega un bloque nuevo
+      // al final — título, sub-encabezado, ítems y una fila en blanco de
+      // separación si ya había contenido.
       var lastRow = sheet.getLastRow();
       var startRow = lastRow > 0 ? lastRow + 2 : 1;
       var nuevasFilas = [[session.title || '', '', '', '', '']];
@@ -476,8 +490,20 @@ function writeMinutas_(ss, data) {
       sheet.getRange(startRow, 1, nuevasFilas.length, 5).setValues(nuevasFilas);
       return;
     }
-    var dataStartRow = session.dataStartRow || (session.headerRow + 1);
-    var colMap = session.colMap || { item:0, cumplido:1, comentario:2, acuerdos:3, revisado:4 };
+
+    // Si headerRow se encontró recién por título (session.headerRow venía
+    // null), el visor todavía no conoce dataStartRow/colMap reales para
+    // este bloque — se recalculan igual que al crearlo: título en
+    // headerRow, sub-encabezado fijo en headerRow+1, ítems desde
+    // headerRow+2, columnas en el orden fijo con el que se escribió arriba.
+    var dataStartRow, colMap;
+    if (session.headerRow) {
+      dataStartRow = session.dataStartRow || (session.headerRow + 1);
+      colMap = session.colMap || { item:0, cumplido:1, comentario:2, acuerdos:3, revisado:4 };
+    } else {
+      dataStartRow = headerRow + 2;
+      colMap = { item:0, cumplido:1, comentario:2, acuerdos:3, revisado:4 };
+    }
 
     var blockEnd = buscarFinBloqueMinuta_(sheet, dataStartRow);
     var currentSize = blockEnd - dataStartRow;
@@ -498,6 +524,22 @@ function writeMinutas_(ss, data) {
       sheet.getRange(targetRow, colMap.revisado + 1).setValue(!!row.revisado);
     }
   });
+}
+
+// Busca una fila cuya columna A coincida EXACTO (trim, sin distinguir
+// mayúsculas) con el título de la sesión — mismo criterio ya usado en
+// Code-Euro.gs/Code-Ando-Visor.gs/Code-Vital.gs. Se usa como respaldo
+// cuando el visor manda headerRow:null pero el bloque ya existe (creado en
+// un guardado anterior), para no duplicarlo.
+function buscarSesionMinutaPorTitulo_(sheet, title) {
+  var target = String(title || '').trim().toLowerCase();
+  if (!target) return null;
+  var lastRow = sheet.getLastRow();
+  for (var r = 1; r <= lastRow; r++) {
+    var val = String(sheet.getRange(r, 1).getValue()).trim().toLowerCase();
+    if (val === target) return r;
+  }
+  return null;
 }
 
 // El bloque de una sesión termina en la siguiente "fila de título" (columna A
